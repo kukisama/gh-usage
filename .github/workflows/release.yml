@@ -1,0 +1,242 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"
+    paths:
+      - Cargo.toml
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, for example v0.1.0 or 0.1.0. Leave empty to use Cargo.toml."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  resolve-version:
+    name: Resolve release version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      skip_release: ${{ steps.version.outputs.skip_release }}
+      create_tag: ${{ steps.version.outputs.create_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version and tag
+        id: version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $cargoToml = Get-Content Cargo.toml -Raw
+          $match = [regex]::Match($cargoToml, '(?m)^version\s*=\s*"(?<version>[^"]+)"')
+          if (-not $match.Success) {
+            throw 'Could not find package version in Cargo.toml.'
+          }
+
+          $cargoVersion = $match.Groups['version'].Value
+          $eventName = '${{ github.event_name }}'
+          $inputVersion = '${{ github.event.inputs.version }}'.Trim()
+          $isTagPush = '${{ github.ref }}'.StartsWith('refs/tags/')
+
+          if ($isTagPush) {
+            $releaseTag = '${{ github.ref_name }}'
+          } elseif ($inputVersion) {
+            $releaseTag = if ($inputVersion.StartsWith('v')) { $inputVersion } else { "v$inputVersion" }
+          } else {
+            $releaseTag = "v$cargoVersion"
+          }
+
+          $releaseVersion = $releaseTag.TrimStart('v')
+          if ($releaseVersion -ne $cargoVersion) {
+            throw "Release tag $releaseTag does not match Cargo.toml version $cargoVersion."
+          }
+
+          git fetch --tags --force
+          $existingTag = git tag -l $releaseTag
+          $skipRelease = 'false'
+          $createTag = 'false'
+
+          if (-not $isTagPush) {
+            if ($existingTag) {
+              if ($eventName -eq 'push') {
+                $skipRelease = 'true'
+                Write-Host "Tag $releaseTag already exists. Skipping automatic release for this push."
+              }
+            } else {
+              $createTag = 'true'
+            }
+          }
+
+          "version=$releaseVersion" >> $env:GITHUB_OUTPUT
+          "tag=$releaseTag" >> $env:GITHUB_OUTPUT
+          "skip_release=$skipRelease" >> $env:GITHUB_OUTPUT
+          "create_tag=$createTag" >> $env:GITHUB_OUTPUT
+
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: resolve-version
+    if: needs.resolve-version.outputs.skip_release != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            binary: gh-usage.exe
+          - os: ubuntu-latest
+            platform: linux
+            binary: gh-usage
+          - os: macos-latest
+            platform: macos
+            binary: gh-usage
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: Test
+        shell: pwsh
+        run: cargo test --locked
+
+      - name: Build release binary
+        shell: pwsh
+        run: cargo build --release --locked -p gh-usage
+
+      - name: Prepare package
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ needs.resolve-version.outputs.tag }}
+          PLATFORM: ${{ matrix.platform }}
+          BINARY_NAME: ${{ matrix.binary }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $arch = switch ($env:RUNNER_ARCH) {
+            'X64' { 'x64' }
+            'ARM64' { 'arm64' }
+            default { $env:RUNNER_ARCH.ToLowerInvariant() }
+          }
+
+          $dist = Join-Path $PWD 'dist'
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+
+          $assetBase = "gh-usage-$env:RELEASE_TAG-$env:PLATFORM-$arch"
+          $packageRoot = Join-Path $dist $assetBase
+          New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
+
+          Copy-Item (Join-Path $PWD "target/release/$env:BINARY_NAME") $packageRoot
+          Copy-Item (Join-Path $PWD 'README.md') $packageRoot
+          Copy-Item (Join-Path $PWD 'LICENSE') $packageRoot
+
+          Compress-Archive -Path (Join-Path $packageRoot '*') -DestinationPath (Join-Path $dist "$assetBase.zip") -Force
+          Get-ChildItem $dist -File | Format-Table Name,Length -AutoSize
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.platform }}-${{ runner.arch }}
+          path: dist/*.zip
+
+  publish:
+    name: Publish release
+    needs:
+      - resolve-version
+      - build
+    if: needs.resolve-version.outputs.skip_release != 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: package-*
+          merge-multiple: true
+
+      - name: Prepare source archive and checksums
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ needs.resolve-version.outputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          git archive --format zip --output "artifacts/gh-usage-$env:RELEASE_TAG-source.zip" HEAD
+
+          Push-Location artifacts
+          Get-FileHash *.zip -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_.Path))" } |
+            Set-Content -Encoding ascii "gh-usage-$env:RELEASE_TAG-checksums.txt"
+          Pop-Location
+
+          Get-ChildItem artifacts -File | Format-Table Name,Length -AutoSize
+
+      - name: Create git tag
+        if: needs.resolve-version.outputs.create_tag == 'true'
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ needs.resolve-version.outputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -a $env:RELEASE_TAG -m "Release $env:RELEASE_TAG"
+          git push origin $env:RELEASE_TAG
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.resolve-version.outputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $notes = @"
+          Release $env:RELEASE_TAG.
+
+          Assets:
+          - Windows executable package
+          - Linux executable package
+          - macOS executable package
+          - Source archive
+          - SHA256 checksums
+          "@
+
+          gh release view $env:RELEASE_TAG *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:RELEASE_TAG --title $env:RELEASE_TAG --notes $notes
+          }
+
+          gh release upload $env:RELEASE_TAG artifacts/*.zip artifacts/*.txt --clobber
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gh-usage-${{ needs.resolve-version.outputs.tag }}
+          path: artifacts/*

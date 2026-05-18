@@ -20,6 +20,7 @@ GitHub Copilot usage data can be useful for local review, troubleshooting, and r
 - CSV output by default for Excel and spreadsheet workflows.
 - Optional JSON output for scripts and automation.
 - Simple single-binary usage after building.
+- Supports Windows, Linux, and macOS default VS Code data paths.
 
 ## Build
 
@@ -29,11 +30,39 @@ Build the optimized release binary:
 .\scripts\build-release.ps1
 ```
 
-The binary is generated at:
+Or use Cargo directly on any supported platform:
+
+```powershell
+cargo build --release -p gh-usage
+```
+
+The binary is generated under:
 
 ```text
-target\release\gh-usage.exe
+target/release/
 ```
+
+## Release packaging
+
+The repository includes a GitHub Actions release workflow at `.github/workflows/release.yml`.
+
+To publish a new release, update the `version` field in `Cargo.toml` and push that commit to `main` or `master`. The workflow will:
+
+1. Resolve the release tag as `v<version>`.
+2. Run the test suite.
+3. Build optimized executables on Windows, Linux, and macOS.
+4. Create the git tag if it does not already exist.
+5. Publish or update the GitHub Release assets.
+
+Release assets include:
+
+- `gh-usage-v<version>-windows-<arch>.zip`: Windows executable with README and license
+- `gh-usage-v<version>-linux-<arch>.zip`: Linux executable with README and license
+- `gh-usage-v<version>-macos-<arch>.zip`: macOS executable with README and license
+- `gh-usage-v<version>-source.zip`: source archive for the released commit
+- `gh-usage-v<version>-checksums.txt`: SHA256 checksums
+
+You can also publish by pushing a tag such as `v0.1.0`, or by running the workflow manually from GitHub Actions.
 
 ## Basic usage
 
@@ -41,6 +70,12 @@ Run without arguments:
 
 ```powershell
 .\target\release\gh-usage.exe
+```
+
+On Linux or macOS, run:
+
+```sh
+./target/release/gh-usage
 ```
 
 By default, the tool:
@@ -134,6 +169,7 @@ CSV files include a UTF-8 BOM by default for better compatibility with Windows E
 ## Notes
 
 - The tool scans local files only.
+- By default, it looks under the standard VS Code `workspaceStorage` location for the current OS.
 - Missing or deleted local history cannot be reconstructed.
 - Records without credit details are ignored.
 - Results are useful for local analysis and rough comparison, not official accounting.

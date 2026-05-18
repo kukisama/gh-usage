@@ -22,11 +22,11 @@ use walkdir::WalkDir;
     version
 )]
 struct Cli {
-    /// VS Code workspaceStorage root. Defaults to %APPDATA%\Code\User\workspaceStorage on Windows.
+    /// VS Code workspaceStorage root. Defaults to the standard VS Code user-data path for the current OS.
     #[arg(long)]
     vscode_workspace_storage: Option<PathBuf>,
 
-    /// Copilot CLI root. Reserved for optional probing; defaults to %USERPROFILE%\.copilot on Windows.
+    /// Copilot CLI root. Reserved for optional probing; defaults to ~/.copilot.
     #[arg(long)]
     copilot_cli_root: Option<PathBuf>,
 
@@ -423,9 +423,52 @@ fn build_summary_report(
 }
 
 fn default_vscode_workspace_storage() -> Option<PathBuf> {
+    let candidates = vscode_workspace_storage_candidates();
+
+    candidates
+        .iter()
+        .find(|path| path.exists())
+        .cloned()
+        .or_else(|| candidates.into_iter().next())
+}
+
+fn vscode_workspace_storage_candidates() -> Vec<PathBuf> {
+    vscode_user_data_dirs()
+        .into_iter()
+        .map(|path| path.join("User").join("workspaceStorage"))
+        .collect()
+}
+
+#[cfg(windows)]
+fn vscode_user_data_dirs() -> Vec<PathBuf> {
     env::var_os("APPDATA")
         .map(PathBuf::from)
-        .map(|path| path.join("Code").join("User").join("workspaceStorage"))
+        .map(|path| vec![path.join("Code"), path.join("Code - Insiders")])
+        .unwrap_or_default()
+}
+
+#[cfg(target_os = "macos")]
+fn vscode_user_data_dirs() -> Vec<PathBuf> {
+    home_dir()
+        .map(|home| {
+            let application_support = home.join("Library").join("Application Support");
+            vec![
+                application_support.join("Code"),
+                application_support.join("Code - Insiders"),
+            ]
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn vscode_user_data_dirs() -> Vec<PathBuf> {
+    let config_home = env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| home_dir().map(|home| home.join(".config")));
+
+    config_home
+        .map(|path| vec![path.join("Code"), path.join("Code - Insiders")])
+        .unwrap_or_default()
 }
 
 fn normalize_zero(value: f64) -> f64 {
@@ -437,9 +480,13 @@ fn normalize_zero(value: f64) -> f64 {
 }
 
 fn default_copilot_cli_root() -> Option<PathBuf> {
-    env::var_os("USERPROFILE")
+    home_dir().map(|path| path.join(".copilot"))
+}
+
+fn home_dir() -> Option<PathBuf> {
+    env::var_os("HOME")
+        .or_else(|| env::var_os("USERPROFILE"))
         .map(PathBuf::from)
-        .map(|path| path.join(".copilot"))
 }
 
 fn cutoff_system_time(days: u64) -> std::time::SystemTime {
