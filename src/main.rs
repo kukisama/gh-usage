@@ -126,6 +126,7 @@ struct RawUsageRecord {
 fn main() -> Result<()> {
     let total_started = Instant::now();
     let no_args = env::args_os().len() == 1;
+    let double_clicked = no_args && launched_from_explorer();
     let cli = Cli::parse();
 
     let vscode_root = cli
@@ -215,7 +216,141 @@ fn main() -> Result<()> {
         }
     }
 
+    if double_clicked {
+        show_double_click_exit_notice(&cli.output);
+    }
+
     Ok(())
+}
+
+fn show_double_click_exit_notice(output: &Path) {
+    println!();
+    println!(
+        "The {} file created in the current directory contains the detailed usage records. Enjoy!",
+        output.display()
+    );
+    println!("Press any key to close this window...");
+    wait_for_any_key();
+}
+
+#[cfg(windows)]
+fn launched_from_explorer() -> bool {
+    windows_parent_process_name()
+        .as_deref()
+        .is_some_and(|name| name.eq_ignore_ascii_case("explorer.exe"))
+}
+
+#[cfg(not(windows))]
+fn launched_from_explorer() -> bool {
+    false
+}
+
+#[cfg(windows)]
+fn wait_for_any_key() {
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::System::Console::{
+        GetConsoleMode, GetStdHandle, ReadConsoleW, SetConsoleMode, ENABLE_ECHO_INPUT,
+        ENABLE_LINE_INPUT, STD_INPUT_HANDLE,
+    };
+
+    unsafe {
+        let handle = GetStdHandle(STD_INPUT_HANDLE);
+        if handle == INVALID_HANDLE_VALUE {
+            return;
+        }
+
+        let mut original_mode = 0;
+        if GetConsoleMode(handle, &mut original_mode) == 0 {
+            let mut input = String::new();
+            let _ = std::io::stdin().read_line(&mut input);
+            return;
+        }
+
+        let single_key_mode = original_mode & !(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT);
+        let _ = SetConsoleMode(handle, single_key_mode);
+
+        let mut buffer = [0u16; 1];
+        let mut chars_read = 0;
+        let _ = ReadConsoleW(
+            handle,
+            buffer.as_mut_ptr().cast(),
+            buffer.len() as u32,
+            &mut chars_read,
+            std::ptr::null_mut(),
+        );
+
+        let _ = SetConsoleMode(handle, original_mode);
+    }
+}
+
+#[cfg(not(windows))]
+fn wait_for_any_key() {}
+
+#[cfg(windows)]
+fn windows_parent_process_name() -> Option<String> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return None;
+        }
+
+        let mut entry = std::mem::zeroed::<PROCESSENTRY32W>();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+
+        let current_pid = std::process::id();
+        let mut parent_pid = None;
+
+        if Process32FirstW(snapshot, &mut entry) != 0 {
+            loop {
+                if entry.th32ProcessID == current_pid {
+                    parent_pid = Some(entry.th32ParentProcessID);
+                    break;
+                }
+
+                if Process32NextW(snapshot, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+
+        let Some(parent_pid) = parent_pid else {
+            let _ = CloseHandle(snapshot);
+            return None;
+        };
+
+        if Process32FirstW(snapshot, &mut entry) != 0 {
+            loop {
+                if entry.th32ProcessID == parent_pid {
+                    let name = wide_process_name_to_string(&entry.szExeFile);
+                    let _ = CloseHandle(snapshot);
+                    return name;
+                }
+
+                if Process32NextW(snapshot, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+
+        let _ = CloseHandle(snapshot);
+        None
+    }
+}
+
+#[cfg(windows)]
+fn wide_process_name_to_string(buffer: &[u16]) -> Option<String> {
+    let len = buffer.iter().position(|ch| *ch == 0).unwrap_or(buffer.len());
+    if len == 0 {
+        None
+    } else {
+        Some(String::from_utf16_lossy(&buffer[..len]))
+    }
 }
 
 fn build_summary_report(
@@ -448,7 +583,7 @@ fn scan_file(path: &Path) -> FileScanResult {
             }
         }
 
-        if !contains_bytes(&line, b"credits") || !contains_bytes(&line, b"details") {
+        if !is_usage_candidate_line(source, &line) {
             continue;
         }
 
@@ -501,6 +636,16 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     memmem::find(haystack, needle).is_some()
 }
 
+fn is_usage_candidate_line(source: &str, line: &[u8]) -> bool {
+    if contains_bytes(line, b"credits") && contains_bytes(line, b"details") {
+        return true;
+    }
+
+    source == "copilot.cli.probe"
+        && contains_bytes(line, b"session.shutdown")
+        && contains_bytes(line, b"modelMetrics")
+}
+
 fn collect_line_extraction(value: &Value, context: ContextFields, extraction: &mut LineExtraction) {
     match value {
         Value::Array(items) => {
@@ -531,11 +676,55 @@ fn collect_line_extraction(value: &Value, context: ContextFields, extraction: &m
                 }
             }
 
+            collect_cli_shutdown_metrics(map, &local, extraction);
+
             for child in map.values() {
                 collect_line_extraction(child, local.clone(), extraction);
             }
         }
         _ => {}
+    }
+}
+
+fn collect_cli_shutdown_metrics(
+    map: &serde_json::Map<String, Value>,
+    context: &ContextFields,
+    extraction: &mut LineExtraction,
+) {
+    if map.get("type").and_then(Value::as_str) != Some("session.shutdown") {
+        return;
+    }
+
+    let Some(model_metrics) = map
+        .get("data")
+        .and_then(|data| data.get("modelMetrics"))
+        .and_then(Value::as_object)
+    else {
+        return;
+    };
+
+    for (model, metrics) in model_metrics {
+        let Some(credits) = metrics
+            .get("requests")
+            .and_then(|requests| requests.get("cost"))
+            .and_then(value_as_f64)
+        else {
+            continue;
+        };
+
+        extraction.records.push(RawUsageRecord {
+            context: context.clone(),
+            model: model.clone(),
+            credits,
+            details: format!("Copilot CLI {model} • {credits} credits"),
+        });
+    }
+}
+
+fn value_as_f64(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(number) => number.as_f64(),
+        _ => None,
     }
 }
 
@@ -547,7 +736,11 @@ fn merge_context_from_object(context: &mut ContextFields, map: &serde_json::Map<
     assign_string(&mut context.agent_id, map, "agentId");
 
     if context.timestamp_ms.is_none() {
-        context.timestamp_ms = map.get("timestamp").and_then(Value::as_i64);
+        context.timestamp_ms = map.get("timestamp").and_then(|value| {
+            value
+                .as_i64()
+                .or_else(|| value.as_str().and_then(parse_rfc3339_timestamp_ms))
+        });
     }
 
     if let Some(Value::Object(model_state)) = map.get("modelState") {
@@ -559,6 +752,12 @@ fn merge_context_from_object(context: &mut ContextFields, map: &serde_json::Map<
     if let Some(completed_at) = map.get("completedAt").and_then(Value::as_i64) {
         context.timestamp_ms = Some(completed_at);
     }
+}
+
+fn parse_rfc3339_timestamp_ms(timestamp: &str) -> Option<i64> {
+    DateTime::parse_from_rfc3339(timestamp)
+        .ok()
+        .map(|time| time.timestamp_millis())
 }
 
 fn assign_string(target: &mut Option<String>, map: &serde_json::Map<String, Value>, key: &str) {
@@ -746,7 +945,10 @@ fn extract_custom_title(value: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_custom_title, parse_credit_details};
+    use super::{
+        collect_line_extraction, extract_custom_title, parse_credit_details, ContextFields,
+        LineExtraction,
+    };
     use serde_json::json;
 
     #[test]
@@ -759,11 +961,38 @@ mod tests {
 
     #[test]
     fn extracts_custom_title_from_chat_session_line() {
-        let value = json!({"kind":1,"k":["customTitle"],"v":"切换速度优化建议"});
+        let value = json!({"kind":1,"k":["customTitle"],"v":"Switching speed optimization notes"});
 
         assert_eq!(
             extract_custom_title(&value).as_deref(),
-            Some("切换速度优化建议")
+            Some("Switching speed optimization notes")
+        );
+    }
+
+    #[test]
+    fn extracts_copilot_cli_shutdown_model_metrics() {
+        let value = json!({
+            "type": "session.shutdown",
+            "timestamp": "2026-05-18T10:56:39.403Z",
+            "data": {
+                "modelMetrics": {
+                    "gpt-5.4": {
+                        "requests": {"count": 1, "cost": 1},
+                        "usage": {"inputTokens": 20028, "outputTokens": 62}
+                    }
+                }
+            }
+        });
+
+        let mut extraction = LineExtraction::default();
+        collect_line_extraction(&value, ContextFields::default(), &mut extraction);
+
+        assert_eq!(extraction.records.len(), 1);
+        assert_eq!(extraction.records[0].model, "gpt-5.4");
+        assert_eq!(extraction.records[0].credits, 1.0);
+        assert_eq!(
+            extraction.records[0].context.timestamp_ms,
+            Some(1779101799403)
         );
     }
 }
