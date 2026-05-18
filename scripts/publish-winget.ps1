@@ -1,3 +1,7 @@
+<#
+See scripts/publish-winget.md for usage, safety notes, and the recommended winget submission workflow.
+#>
+
 param(
     [Parameter(Mandatory = $true)]
     [ValidatePattern('^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$')]
@@ -11,9 +15,9 @@ param(
     [string]$ManifestVersion = '1.10.0',
     [string]$OutputRoot = '.\target\winget',
 
-    [switch]$InstallWingetCreate,
     [switch]$Validate,
-    [switch]$Submit
+    [switch]$Submit,
+    [switch]$ForceSubmit
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,6 +35,54 @@ function Assert-Command {
         }
 
         throw "$Name was not found."
+    }
+}
+
+function Test-CommandAvailable {
+    param([Parameter(Mandatory = $true)][string]$Name)
+    return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
+}
+
+function Install-WingetPackage {
+    param(
+        [Parameter(Mandatory = $true)][string]$PackageId,
+        [Parameter(Mandatory = $true)][string]$DisplayName
+    )
+
+    Write-Host "Installing $DisplayName ($PackageId)..." -ForegroundColor Cyan
+    winget install --id $PackageId --exact --source winget --disable-interactivity --accept-source-agreements --accept-package-agreements
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to install $DisplayName ($PackageId). Install it manually, restart the console, then rerun this script."
+    }
+}
+
+function Initialize-Prerequisites {
+    if (-not (Test-CommandAvailable 'winget')) {
+        throw "winget was not found. Install App Installer / Windows Package Manager first, restart the console, then rerun this script."
+    }
+
+    $requiredPackages = @(
+        @{ Command = 'pwsh'; PackageId = 'Microsoft.PowerShell'; DisplayName = 'PowerShell 7' },
+        @{ Command = 'git'; PackageId = 'Git.Git'; DisplayName = 'Git' },
+        @{ Command = 'gh'; PackageId = 'GitHub.cli'; DisplayName = 'GitHub CLI' },
+        @{ Command = 'wingetcreate'; PackageId = 'Microsoft.WingetCreate'; DisplayName = 'Windows Package Manager Manifest Creator' }
+    )
+
+    $installedPackages = @()
+    foreach ($package in $requiredPackages) {
+        if (-not (Test-CommandAvailable $package.Command)) {
+            Install-WingetPackage -PackageId $package.PackageId -DisplayName $package.DisplayName
+            $installedPackages += $package.DisplayName
+        }
+    }
+
+    if ($installedPackages.Count -gt 0) {
+        $installedList = $installedPackages -join ', '
+        throw "Installed missing prerequisite(s): $installedList. Restart the console so PATH and app execution aliases are refreshed, then rerun this script from PowerShell 7."
+    }
+
+    if ($PSVersionTable.PSEdition -ne 'Core' -or $PSVersionTable.PSVersion.Major -lt 7) {
+        throw "PowerShell 7 is installed but this session is not running PowerShell 7. Restart the console with 'pwsh', then rerun this script."
     }
 }
 
@@ -129,6 +181,41 @@ function Test-ZipContainsExe {
     }
 }
 
+function Get-ExistingWingetPullRequests {
+    param(
+        [Parameter(Mandatory = $true)][string]$PackageIdentifier,
+        [Parameter(Mandatory = $true)][string]$PackageVersion
+    )
+
+    $pullRequestTitle = "$PackageIdentifier version $PackageVersion"
+    $output = & gh search prs $pullRequestTitle --repo microsoft/winget-pkgs --state open --match title --json number,title,url,author --limit 10
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to search for existing winget pull requests. Rerun with -ForceSubmit only if you have manually confirmed there is no duplicate open PR."
+    }
+
+    return @($output | ConvertFrom-Json | Where-Object { $_.title -eq $pullRequestTitle })
+}
+
+function Assert-NoExistingWingetPullRequest {
+    param(
+        [Parameter(Mandatory = $true)][string]$PackageIdentifier,
+        [Parameter(Mandatory = $true)][string]$PackageVersion,
+        [switch]$Force
+    )
+
+    if ($Force) {
+        Write-Host "Skipping duplicate PR guard because -ForceSubmit was provided." -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host "Checking for existing open winget PRs..." -ForegroundColor Cyan
+    $existingPullRequests = @(Get-ExistingWingetPullRequests -PackageIdentifier $PackageIdentifier -PackageVersion $PackageVersion)
+    if ($existingPullRequests.Count -gt 0) {
+        $pullRequestList = ($existingPullRequests | ForEach-Object { "#$($_.number) $($_.url)" }) -join [Environment]::NewLine
+        throw "An open winget PR already exists for $PackageIdentifier $PackageVersion. Do not submit a duplicate PR.`n$pullRequestList`nIf you intentionally need to resubmit after closing or replacing the existing PR, rerun with -ForceSubmit."
+    }
+}
+
 function Write-WingetManifestFiles {
     param(
         [Parameter(Mandatory = $true)][string]$ManifestDir,
@@ -211,18 +298,12 @@ $assetName = "gh-usage-$releaseTag-windows-x64.zip"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
-Assert-Command -Name gh -InstallHint 'Install GitHub CLI from https://cli.github.com/ and run gh auth login.'
+Initialize-Prerequisites
 
 Write-Host "Checking GitHub authentication..." -ForegroundColor Cyan
 & gh auth status *> $null
 if ($LASTEXITCODE -ne 0) {
     throw 'GitHub CLI is not authenticated. Run: gh auth login'
-}
-
-if ($InstallWingetCreate -and -not (Get-Command wingetcreate -ErrorAction SilentlyContinue)) {
-    Assert-Command -Name winget -InstallHint 'Install winget first, then rerun with -InstallWingetCreate.'
-    Write-Host "Installing Microsoft.WingetCreate..." -ForegroundColor Cyan
-    winget install Microsoft.WingetCreate --disable-interactivity --accept-source-agreements --accept-package-agreements
 }
 
 Write-Host "Reading GitHub release $releaseTag..." -ForegroundColor Cyan
@@ -266,6 +347,10 @@ Write-Host "InstallerUrl: $assetUrl"
 Write-Host "InstallerSha256: $installerSha256"
 Write-Host ""
 
+if ($Submit) {
+    Assert-NoExistingWingetPullRequest -PackageIdentifier $PackageIdentifier -PackageVersion $releaseVersion -Force:$ForceSubmit
+}
+
 if ($Validate -or $Submit) {
     Assert-Command -Name winget -InstallHint 'Install winget from https://learn.microsoft.com/windows/package-manager/winget/.'
 
@@ -286,7 +371,6 @@ if ($Submit) {
     }
 } else {
     Write-Host "Next steps:" -ForegroundColor Yellow
-    Write-Host "  1. Install wingetcreate if needed: winget install Microsoft.WingetCreate"
-    Write-Host "  2. Validate: .\scripts\publish-winget.ps1 -Version $releaseVersion -Validate"
-    Write-Host "  3. Submit:   .\scripts\publish-winget.ps1 -Version $releaseVersion -Submit"
+    Write-Host "  1. Validate: .\scripts\publish-winget.ps1 -Version $releaseVersion -Validate"
+    Write-Host "  2. Submit:   .\scripts\publish-winget.ps1 -Version $releaseVersion -Submit"
 }
