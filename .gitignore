@@ -1,0 +1,11 @@
+/target/
+/copilot-usage.csv
+/copilot-usage.json
+/gh-usage.csv
+/gh-usage.json
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
