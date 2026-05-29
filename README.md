@@ -22,6 +22,41 @@ GitHub Copilot usage data can be useful for local review, troubleshooting, and r
 - Simple single-binary usage after building.
 - Supports Windows, Linux, and macOS default VS Code data paths.
 
+## Install
+
+### Windows (winget)
+
+The package is published to the official [winget-pkgs](https://github.com/microsoft/winget-pkgs) repository as `gh-usage`.
+
+```powershell
+winget install gh-usage
+
+```
+
+Upgrade to the latest version:
+
+```powershell
+winget upgrade gh-usage
+```
+
+Uninstall:
+
+```powershell
+winget uninstall gh-usage
+```
+
+After installation, the `gh-usage` command is available on `PATH`:
+
+```powershell
+gh-usage --help
+```
+
+> Note: It may take some time for a newly merged manifest to propagate to the winget source. If `winget install` reports the package was not found, run `winget source update` and try again later.
+
+### Other platforms
+
+Download the prebuilt archive for your OS from the [Releases page](https://github.com/kukisama/gh-usage/releases), or build from source (see below).
+
 ## Build
 
 Build the optimized release binary:
