@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
 use std::env;
-use std::fmt::Write as FmtWrite;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -11,7 +10,7 @@ use chrono::{DateTime, Local, Utc};
 use clap::{Parser, ValueEnum};
 use memchr::memmem;
 use rayon::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use walkdir::WalkDir;
 
@@ -69,6 +68,11 @@ struct Cli {
     /// Do not write a UTF-8 BOM for file output. By default files include BOM for Windows Excel compatibility.
     #[arg(long)]
     no_bom: bool,
+
+    /// Merge mode. Read every `copilot-usage-*.csv` in DIR (or the current directory when DIR is omitted)
+    /// and render a combined `copilot-usage-merged.html` next to those CSVs. Skips the local VS Code scan.
+    #[arg(long, value_name = "DIR", num_args = 0..=1, default_missing_value = ".")]
+    merge: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -87,22 +91,37 @@ struct ContextFields {
     timestamp_ms: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct UsageRecord {
+    #[serde(default)]
     source: String,
+    #[serde(default)]
     hostname: String,
+    #[serde(default)]
     timestamp_ms: Option<i64>,
+    #[serde(default)]
     local_time_hint: Option<String>,
+    #[serde(default)]
     chat_title: Option<String>,
+    #[serde(default)]
     model: String,
+    #[serde(default)]
     model_id: Option<String>,
+    #[serde(default)]
     credits: f64,
+    #[serde(default)]
     details: String,
+    #[serde(default)]
     session_id: Option<String>,
+    #[serde(default)]
     request_id: Option<String>,
+    #[serde(default)]
     response_id: Option<String>,
+    #[serde(default)]
     agent_id: Option<String>,
+    #[serde(default)]
     file: String,
+    #[serde(default)]
     line: usize,
 }
 
@@ -141,6 +160,10 @@ fn main() -> Result<()> {
     let no_args = env::args_os().len() == 1;
     let double_clicked = no_args && launched_from_explorer();
     let cli = Cli::parse();
+
+    if let Some(dir) = cli.merge.clone() {
+        return run_merge(&dir, double_clicked);
+    }
 
     let hostname = cli
         .hostname
@@ -267,18 +290,47 @@ fn main() -> Result<()> {
 fn show_double_click_exit_notice(output: &Path, html: Option<&Path>) {
     println!();
     println!(
-        "The {} file created in the current directory contains the detailed usage records. Enjoy!",
+        "CSV saved to {}",
         output.display()
     );
+    println!(
+        "  Every parsed Copilot usage record is in there - import it into Excel,"
+    );
+    println!(
+        "  Power BI, or pipe it through your own scripts for deeper analysis."
+    );
     if let Some(html) = html {
+        println!();
+        println!("HTML report saved to {}", html.display());
         println!(
-            "A standalone HTML summary was also written to {}. Double-click it to open in your browser.",
-            html.display()
+            "  A self-contained, offline-friendly page with charts, host/model"
         );
+        println!(
+            "  filters, and a paginated record table. Safe to email or archive."
+        );
+        println!();
+        println!(">> Press any key to open the HTML report in your default browser.");
+        println!("   (Or close this window to skip - both files are already on disk.)");
+        wait_for_any_key();
+        open_path(html);
+    } else {
+        println!();
+        println!("HTML report skipped (--no-html). The CSV above is your full dataset.");
+        println!();
+        println!(">> Press any key to close this window. The CSV is already saved.");
+        wait_for_any_key();
     }
-    println!("Press any key to close this window...");
-    wait_for_any_key();
 }
+
+#[cfg(windows)]
+fn open_path(path: &Path) {
+    // `explorer.exe <path>` resolves files via the default shell handler
+    // (HTML → default browser), without blocking us on the launched process.
+    let _ = std::process::Command::new("explorer.exe").arg(path).spawn();
+}
+
+#[cfg(not(windows))]
+fn open_path(_path: &Path) {}
 
 #[cfg(windows)]
 fn launched_from_explorer() -> bool {
@@ -400,15 +452,211 @@ fn wide_process_name_to_string(buffer: &[u16]) -> Option<String> {
     }
 }
 
+/// Merge mode: read every `copilot-usage-*.csv` in `dir`, combine + dedupe,
+/// render a single `copilot-usage-merged.html` next to those CSVs.
+fn run_merge(dir: &Path, double_clicked: bool) -> Result<()> {
+    if !dir.is_dir() {
+        anyhow::bail!(
+            "merge target is not a directory: {}",
+            dir.display()
+        );
+    }
+
+    let mut csv_files: Vec<PathBuf> = Vec::new();
+    for entry in fs::read_dir(dir)
+        .with_context(|| format!("read_dir failed for {}", dir.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = match path.file_name().and_then(|s| s.to_str()) {
+            Some(n) => n,
+            None => continue,
+        };
+        let lower = name.to_ascii_lowercase();
+        if !lower.starts_with("copilot-usage-") || !lower.ends_with(".csv") {
+            continue;
+        }
+        // Skip our own merged outputs so re-running is idempotent.
+        if lower == "copilot-usage-merged.csv" {
+            continue;
+        }
+        csv_files.push(path);
+    }
+    csv_files.sort();
+
+    if csv_files.is_empty() {
+        anyhow::bail!(
+            "no copilot-usage-*.csv files found in {}",
+            dir.display()
+        );
+    }
+
+    let mut records: Vec<UsageRecord> = Vec::new();
+    let mut per_file: Vec<(PathBuf, usize)> = Vec::new();
+    let mut row_errors: usize = 0;
+    for path in &csv_files {
+        let before = records.len();
+        let mut reader = csv::ReaderBuilder::new()
+            .flexible(true)
+            .from_path(path)
+            .with_context(|| format!("open csv {}", path.display()))?;
+        for row in reader.deserialize::<UsageRecord>() {
+            match row {
+                Ok(record) => records.push(record),
+                Err(_) => row_errors += 1,
+            }
+        }
+        per_file.push((path.clone(), records.len() - before));
+    }
+
+    // Backfill hostname for legacy CSVs (pre-hostname column) using the file stem.
+    for (path, _) in &per_file {
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        if let Some(host_from_name) = stem.strip_prefix("copilot-usage-") {
+            for record in records.iter_mut().filter(|r| r.hostname.is_empty()) {
+                record.hostname = host_from_name.to_owned();
+            }
+        }
+    }
+
+    records.sort_by(|a, b| {
+        a.hostname
+            .cmp(&b.hostname)
+            .then_with(|| a.timestamp_ms.cmp(&b.timestamp_ms))
+            .then_with(|| a.file.cmp(&b.file))
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.response_id.cmp(&b.response_id))
+    });
+    records.dedup_by(|a, b| {
+        a.hostname == b.hostname
+            && a.file == b.file
+            && a.line == b.line
+            && a.response_id == b.response_id
+            && a.details == b.details
+    });
+
+    let hosts: std::collections::BTreeSet<String> =
+        records.iter().map(|r| r.hostname.clone()).collect();
+    let primary_host = hosts
+        .iter()
+        .next()
+        .cloned()
+        .unwrap_or_else(|| "merged".to_owned());
+
+    let html_path = dir.join("copilot-usage-merged.html");
+    write_html(&html_path, &records, &primary_host)?;
+
+    // Compact merge summary, mirroring the look of the regular scan report.
+    const INNER: usize = 54;
+    let row = |content: String| -> String {
+        let len = content.chars().count();
+        let padded = if len < INNER {
+            format!("{content}{}", " ".repeat(INNER - len))
+        } else {
+            content.chars().take(INNER).collect()
+        };
+        format!("| {padded} |\n")
+    };
+    let header = |title: &str| -> String {
+        let prefix = format!("- {title} ");
+        let pad = (INNER + 2).saturating_sub(prefix.chars().count());
+        format!("+{prefix}{}+\n", "-".repeat(pad))
+    };
+    let plain_border = || -> String { format!("+{}+\n", "-".repeat(INNER + 2)) };
+
+    let total_credits = normalize_zero(records.iter().map(|r| r.credits).sum());
+    let host_list: Vec<&str> = hosts.iter().map(String::as_str).collect();
+
+    let mut out = String::new();
+    out.push_str(&header("GitHub Copilot Usage - Merge"));
+    out.push_str(&row(format!(
+        "{:<14}{:>12}  {:<14}{:>12}",
+        "csv files",
+        csv_files.len(),
+        "row errors",
+        row_errors
+    )));
+    out.push_str(&row(format!(
+        "{:<14}{:>12}  {:<14}{:>12}",
+        "records",
+        records.len(),
+        "hosts",
+        hosts.len()
+    )));
+    out.push_str(&row(format!(
+        "{:<14}{:>12}  {:<14}{:>12}",
+        "total credits",
+        format!("{:.1}", total_credits),
+        "target dir",
+        clip(&dir.display().to_string(), 12)
+    )));
+
+    out.push_str(&header("Sources"));
+    for (path, count) in &per_file {
+        let file_name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("<unknown>");
+        out.push_str(&row(format!(
+            "{:<40}{:>14}",
+            clip(file_name, 40),
+            format!("{count} rows")
+        )));
+    }
+
+    out.push_str(&header("Hosts"));
+    out.push_str(&row(clip(&host_list.join(", "), INNER)));
+
+    out.push_str(&header("Output"));
+    out.push_str(&row(format!(
+        "html  {}",
+        clip(&html_path.display().to_string(), INNER - 6)
+    )));
+    out.push_str(&plain_border());
+    print!("{out}");
+
+    if double_clicked {
+        show_merge_exit_notice(&html_path, &host_list);
+    }
+    Ok(())
+}
+
+fn show_merge_exit_notice(html: &Path, hosts: &[&str]) {
+    println!();
+    println!("Merged HTML report saved to {}", html.display());
+    println!(
+        "  Combined data from {} machine(s): {}",
+        hosts.len(),
+        hosts.join(", ")
+    );
+    println!(
+        "  Open it in any browser - charts, filters, and pagination work offline,"
+    );
+    println!(
+        "  and the single file is safe to email or archive."
+    );
+    println!();
+    println!(">> Press any key to open the merged report in your default browser.");
+    println!("   (Or close this window to skip - the HTML is already on disk.)");
+    wait_for_any_key();
+    open_path(html);
+}
+
 fn build_summary_report(
     output: &Path,
     html: Option<&Path>,
     records: &[UsageRecord],
     stats: &ScanStats,
-    discover_ms: u128,
-    scan_ms: u128,
-    reduce_ms: u128,
-    write_ms: u128,
+    _discover_ms: u128,
+    _scan_ms: u128,
+    _reduce_ms: u128,
+    _write_ms: u128,
     total_ms: u128,
 ) -> String {
     let total_credits = normalize_zero(records.iter().map(|record| record.credits).sum());
@@ -434,43 +682,92 @@ fn build_summary_report(
         0.0
     };
 
+    // Layout: outer width 58, inner content width 54.
+    const INNER: usize = 54;
+    let row = |content: String| -> String {
+        let len = content.chars().count();
+        let padded = if len < INNER {
+            format!("{content}{}", " ".repeat(INNER - len))
+        } else {
+            content.chars().take(INNER).collect()
+        };
+        format!("| {padded} |\n")
+    };
+    let header = |title: &str| -> String {
+        // Inner dashed span between the two `+` corners must equal INNER + 2.
+        let prefix = format!("- {title} ");
+        let pad = (INNER + 2).saturating_sub(prefix.chars().count());
+        format!("+{prefix}{}+\n", "-".repeat(pad))
+    };
+    let plain_border = || -> String { format!("+{}+\n", "-".repeat(INNER + 2)) };
+
+    let kv2 = |lk: &str, lv: String, rk: &str, rv: String| -> String {
+        // 14 label + 12 value + 2 sep + 14 label + 12 value = 54
+        row(format!(
+            "{:<14}{:>12}  {:<14}{:>12}",
+            lk, lv, rk, rv
+        ))
+    };
+
     let mut report = String::new();
-    let _ = writeln!(report, "GitHub Copilot usage summary");
-    let _ = writeln!(report, "output={}", output.display());
-    if let Some(html) = html {
-        let _ = writeln!(report, "html={}", html.display());
-    }
-    let _ = writeln!(report, "records={}", records.len());
-    let _ = writeln!(report, "total_credits={:.3}", total_credits);
-    let _ = writeln!(report, "active_days={}", active_days);
-    let _ = writeln!(
-        report,
-        "avg_credits_per_active_day={:.3}",
-        average_per_active_day
-    );
-    let _ = writeln!(report);
-    let _ = writeln!(report, "daily_credits:");
-    if daily.is_empty() {
-        let _ = writeln!(report, "  none");
-    } else {
-        for (day, (count, credits)) in daily {
-            let _ = writeln!(report, "  {} records={} credits={:.3}", day, count, credits);
+    report.push_str(&header("GitHub Copilot Usage"));
+    report.push_str(&kv2(
+        "records",
+        records.len().to_string(),
+        "scanned files",
+        stats.scanned_files.to_string(),
+    ));
+    report.push_str(&kv2(
+        "total credits",
+        format!("{:.1}", total_credits),
+        "candidate lines",
+        stats.json_candidate_lines.to_string(),
+    ));
+    report.push_str(&kv2(
+        "active days",
+        active_days.to_string(),
+        "parse errors",
+        stats.parse_errors.to_string(),
+    ));
+    report.push_str(&kv2(
+        "avg / day",
+        format!("{:.1}", average_per_active_day),
+        "total time",
+        format!("{:.2} s", total_ms as f64 / 1000.0),
+    ));
+
+    if !daily.is_empty() {
+        report.push_str(&header("Daily credits"));
+        for (day, (count, credits)) in &daily {
+            // 12 date + 6 records right + 11 " records   " + 12 credits right + 13 " credits   " = 54
+            report.push_str(&row(format!(
+                "{:<12}{:>5} records   {:>10.2} credits     ",
+                day, count, credits
+            )));
         }
     }
-    let _ = writeln!(report);
-    let _ = writeln!(report, "scan_stats:");
-    let _ = writeln!(report, "  scanned_files={}", stats.scanned_files);
-    let _ = writeln!(report, "  scanned_lines={}", stats.scanned_lines);
-    let _ = writeln!(report, "  candidate_lines={}", stats.json_candidate_lines);
-    let _ = writeln!(report, "  parse_errors={}", stats.parse_errors);
-    let _ = writeln!(report);
-    let _ = writeln!(report, "timing_ms:");
-    let _ = writeln!(report, "  discover_ms={}", discover_ms);
-    let _ = writeln!(report, "  scan_ms={}", scan_ms);
-    let _ = writeln!(report, "  reduce_ms={}", reduce_ms);
-    let _ = writeln!(report, "  write_ms={}", write_ms);
-    let _ = writeln!(report, "  total_ms={}", total_ms);
+
+    report.push_str(&header("Files"));
+    report.push_str(&row(format!("csv   {}", clip(&output.display().to_string(), INNER - 6))));
+    if let Some(html) = html {
+        report.push_str(&row(format!("html  {}", clip(&html.display().to_string(), INNER - 6))));
+    } else {
+        report.push_str(&row("html  (disabled via --no-html)".to_owned()));
+    }
+    report.push_str(&plain_border());
     report
+}
+
+fn clip(s: &str, max: usize) -> String {
+    let count = s.chars().count();
+    if count <= max {
+        return s.to_owned();
+    }
+    // Keep tail (filename) visible; replace head with "…".
+    let skip = count - (max - 1);
+    let mut out = String::from("…");
+    out.extend(s.chars().skip(skip));
+    out
 }
 
 fn default_vscode_workspace_storage() -> Option<PathBuf> {
