@@ -1,0 +1,848 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>gh-usage report</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-elev: #161b22;
+    --bg-elev2: #1f262d;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --accent2: #d2a8ff;
+    --good: #3fb950;
+    --warn: #d29922;
+    --grid: #21262d;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  header.top {
+    padding: 12px 24px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--bg-elev); position: sticky; top: 0; z-index: 5;
+    gap: 12px; flex-wrap: wrap;
+  }
+  header.top .title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  header.top h1 { margin: 0; font-size: 16px; font-weight: 600; }
+  header.top .meta { color: var(--text-dim); font-size: 12px; }
+  header.top .right { display: flex; align-items: center; gap: 12px; }
+
+  .lang-switch {
+    display: inline-flex; border: 1px solid var(--border); border-radius: 999px;
+    overflow: hidden; background: var(--bg-elev2);
+  }
+  .lang-switch button {
+    background: transparent; color: var(--text-dim); border: 0;
+    padding: 4px 12px; font-size: 12px; cursor: pointer;
+  }
+  .lang-switch button.active { background: var(--accent); color: #0d1117; font-weight: 700; }
+
+  .icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; border-radius: 50%;
+    color: var(--text-dim); border: 1px solid var(--border); background: var(--bg-elev2);
+  }
+  .icon-btn:hover { color: var(--text); border-color: var(--text-dim); text-decoration: none; }
+  .icon-btn svg { width: 16px; height: 16px; fill: currentColor; }
+
+  main { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 50px); }
+  aside { border-right: 1px solid var(--border); background: var(--bg-elev); padding: 16px; }
+  aside h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-dim); margin: 0 0 10px;
+  }
+  .machine-list { list-style: none; padding: 0; margin: 0 0 18px; }
+  .machine-list li {
+    padding: 6px 10px; border-radius: 6px; cursor: pointer;
+    display: flex; align-items: center; gap: 8px; font-size: 13px;
+  }
+  .machine-list li:hover { background: var(--bg-elev2); }
+  .machine-list input { accent-color: var(--accent); }
+  .machine-list .host { font-weight: 600; }
+  .machine-list .sub { color: var(--text-dim); font-size: 11px; margin-left: auto; font-variant-numeric: tabular-nums; }
+  .machine-list .swatch { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+
+  .section { padding: 22px 28px; }
+
+  .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px; }
+  .kpi { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .kpi .label { color: var(--text-dim); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  .kpi .value { font-size: 26px; font-weight: 700; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .kpi .delta { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+
+  .grid-2 { display: grid; grid-template-columns: 2fr 1fr; gap: 18px; }
+  .card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .card h3 {
+    margin: 0 0 12px; font-size: 13px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--text-dim); font-weight: 600;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table th, table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--grid); }
+  table th { color: var(--text-dim); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  table tr:hover td { background: var(--bg-elev2); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  .toolbar { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
+  .toolbar input[type=search], .toolbar select {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    padding: 6px 10px; border-radius: 6px;
+  }
+  .toolbar input[type=search] { min-width: 240px; }
+  .toolbar .count { color: var(--text-dim); font-size: 12px; margin-left: auto; }
+
+  .chip { display: inline-block; padding: 2px 8px; border-radius: 10px; background: var(--bg-elev2); font-size: 11px; font-weight: 600; }
+  .chip.host { color: var(--accent); }
+  .chip.model { color: var(--accent2); }
+
+  svg.chart { display: block; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; font-size: 12px; color: var(--text-dim); }
+  .legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+
+  footer {
+    padding: 18px 28px; border-top: 1px solid var(--border); background: var(--bg-elev);
+    display: flex; justify-content: space-between; align-items: center; gap: 18px; flex-wrap: wrap;
+  }
+  footer .contact { display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--text-dim); }
+  footer .contact a { color: var(--accent); }
+  footer .small { color: var(--text-dim); font-size: 11px; }
+
+  .empty { color: var(--text-dim); font-size: 13px; padding: 24px 0; text-align: center; }
+
+  .pg-btn {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    padding: 4px 10px; border-radius: 6px; font-size: 12px; cursor: pointer;
+  }
+  .pg-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .pg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="title">
+    <h1 data-i18n="app.title">gh-usage report</h1>
+    <span class="meta">
+      <span data-i18n="header.generated">Generated</span> <span id="generated-at">—</span>
+      · <span id="summary-line"></span>
+    </span>
+  </div>
+  <div class="right">
+    <a class="icon-btn" href="https://github.com/kukisama/gh-usage" target="_blank" rel="noopener"
+       title="github.com/kukisama/gh-usage" aria-label="GitHub repository">
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+          0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01
+          1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95
+          0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68
+          0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82
+          2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012
+          8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+      </svg>
+    </a>
+    <div class="lang-switch" role="tablist" aria-label="Language">
+      <button data-lang="en" class="active">EN</button>
+      <button data-lang="zh">中</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <aside>
+    <h2 data-i18n="aside.machines">Machines</h2>
+    <ul id="machine-list" class="machine-list"></ul>
+
+    <h2 data-i18n="aside.dateRange">Date range</h2>
+    <div id="date-range" style="font-size:12px;color:var(--text-dim);">—</div>
+  </aside>
+
+  <section class="section">
+    <div class="kpi-row">
+      <div class="kpi">
+        <div class="label" data-i18n="kpi.total">Total credits</div>
+        <div class="value" id="kpi-total">0</div>
+        <div class="delta" id="kpi-total-sub"></div>
+      </div>
+      <div class="kpi">
+        <div class="label" data-i18n="kpi.activeDays">Active days</div>
+        <div class="value" id="kpi-days">0</div>
+        <div class="delta" id="kpi-days-sub"></div>
+      </div>
+      <div class="kpi">
+        <div class="label" data-i18n="kpi.records">Records</div>
+        <div class="value" id="kpi-records">0</div>
+        <div class="delta" id="kpi-records-sub"></div>
+      </div>
+      <div class="kpi">
+        <div class="label" data-i18n="kpi.avgPerDay">Avg / active day</div>
+        <div class="value" id="kpi-avg">0</div>
+        <div class="delta" id="kpi-avg-sub"></div>
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-bottom:18px;">
+      <div class="card">
+        <h3 data-i18n="charts.daily">Daily credits (stacked by machine)</h3>
+        <div id="daily-chart"></div>
+        <div id="daily-legend" class="legend"></div>
+      </div>
+      <div class="card">
+        <h3 data-i18n="charts.byModel">By model</h3>
+        <div id="model-chart"></div>
+        <div id="model-legend" class="legend" style="flex-direction:column;gap:4px;"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:18px;">
+      <h3 data-i18n="tables.byMachine">By machine</h3>
+      <table>
+        <thead>
+          <tr>
+            <th data-i18n="cols.machine">Machine</th>
+            <th class="num" data-i18n="cols.records">Records</th>
+            <th class="num" data-i18n="cols.activeDays">Active days</th>
+            <th data-i18n="cols.topModel">Top model</th>
+            <th class="num" data-i18n="cols.credits">Credits</th>
+            <th class="num" data-i18n="cols.share">Share</th>
+          </tr>
+        </thead>
+        <tbody id="by-machine-body"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3 data-i18n="tables.records">Records</h3>
+      <div class="toolbar">
+        <input id="filter" type="search"
+               data-i18n-attr='{"placeholder":"toolbar.filter"}'
+               placeholder="Filter by model, chat title, host…">
+        <select id="model-filter">
+          <option value="" data-i18n="toolbar.allModels">All models</option>
+        </select>
+        <select id="source-filter">
+          <option value="" data-i18n="toolbar.allSources">All sources</option>
+        </select>
+        <select id="page-size">
+          <option value="10">10</option>
+          <option value="20" selected>20</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+        <span class="count" id="records-count"></span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th data-i18n="cols.timeLocal">Time (local)</th>
+            <th data-i18n="cols.host">Host</th>
+            <th data-i18n="cols.model">Model</th>
+            <th data-i18n="cols.chatTitle">Chat title</th>
+            <th class="num" data-i18n="cols.credits">Credits</th>
+            <th data-i18n="cols.source">Source</th>
+          </tr>
+        </thead>
+        <tbody id="records-body"></tbody>
+      </table>
+      <div id="pagination" class="toolbar" style="margin-top:12px;justify-content:flex-end;"></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="contact">
+    <span data-i18n="footer.contact">Contact the author:</span>
+    <a href="mailto:Pengliang.Zhang@microsoft.com" title="Pengliang.Zhang@microsoft.com">Pengliang.Zhang@microsoft.com</a>
+    <a class="icon-btn" href="https://github.com/kukisama/gh-usage" target="_blank" rel="noopener"
+       title="github.com/kukisama/gh-usage" aria-label="GitHub repository">
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+          0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01
+          1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95
+          0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68
+          0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82
+          2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012
+          8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+      </svg>
+    </a>
+  </div>
+  <div class="small" data-i18n="footer.note">Generated locally by gh-usage. Data stays on this machine.</div>
+</footer>
+
+<script id="gh-usage-data" type="application/json">__GH_USAGE_DATA__</script>
+
+<script>
+  // ---------- i18n ----------
+  const I18N = {
+    en: {
+      "app.title": "gh-usage report",
+      "header.generated": "Generated",
+      "header.summary": "{machines} machine(s) · {records} record(s)",
+      "aside.machines": "Machines",
+      "aside.all": "All",
+      "aside.dateRange": "Date range",
+      "kpi.total": "Total credits",
+      "kpi.activeDays": "Active days",
+      "kpi.records": "Records",
+      "kpi.avgPerDay": "Avg / active day",
+      "kpi.lastSeen": "last: {d}",
+      "kpi.acrossMachines": "across {n} machine(s)",
+      "kpi.peak": "peak {v} on {d}",
+      "kpi.noTime": "no timestamps",
+      "charts.daily": "Daily credits (stacked by machine)",
+      "charts.byModel": "By model",
+      "charts.credits": "credits",
+      "charts.others": "others",
+      "tables.byMachine": "By machine",
+      "tables.records": "Records",
+      "cols.machine": "Machine",
+      "cols.records": "Records",
+      "cols.activeDays": "Active days",
+      "cols.topModel": "Top model",
+      "cols.credits": "Credits",
+      "cols.share": "Share",
+      "cols.timeLocal": "Time (local)",
+      "cols.host": "Host",
+      "cols.model": "Model",
+      "cols.chatTitle": "Chat title",
+      "cols.source": "Source",
+      "toolbar.filter": "Filter by model, chat title, host…",
+      "toolbar.allSources": "All sources",
+      "toolbar.allModels": "All models",
+      "toolbar.showing": "Showing {shown} of {total}",
+      "pagination.page": "Page {current} / {total}",
+      "pagination.prev": "Prev",
+      "pagination.next": "Next",
+      "pagination.first": "« First",
+      "pagination.last": "Last »",
+      "pagination.rowsPerPage": "Rows / page",
+      "footer.contact": "Contact the author:",
+      "footer.note": "Generated locally by gh-usage. Data stays on this machine.",
+      "empty.records": "No records match the current filter.",
+      "empty.data": "No usage records found."
+    },
+    zh: {
+      "app.title": "gh-usage 使用报告",
+      "header.generated": "生成于",
+      "header.summary": "{machines} 台机器 · {records} 条记录",
+      "aside.machines": "机器列表",
+      "aside.all": "全部",
+      "aside.dateRange": "日期范围",
+      "kpi.total": "总积分",
+      "kpi.activeDays": "活跃天数",
+      "kpi.records": "记录数",
+      "kpi.avgPerDay": "日均（活跃日）",
+      "kpi.lastSeen": "最近：{d}",
+      "kpi.acrossMachines": "覆盖 {n} 台机器",
+      "kpi.peak": "峰值 {v}（{d}）",
+      "kpi.noTime": "无时间戳",
+      "charts.daily": "每日积分（按机器堆叠）",
+      "charts.byModel": "按模型分布",
+      "charts.credits": "积分",
+      "charts.others": "其他",
+      "tables.byMachine": "按机器汇总",
+      "tables.records": "明细记录",
+      "cols.machine": "机器",
+      "cols.records": "记录数",
+      "cols.activeDays": "活跃天数",
+      "cols.topModel": "主要模型",
+      "cols.credits": "积分",
+      "cols.share": "占比",
+      "cols.timeLocal": "本地时间",
+      "cols.host": "机器",
+      "cols.model": "模型",
+      "cols.chatTitle": "会话标题",
+      "cols.source": "来源",
+      "toolbar.filter": "按模型 / 会话标题 / 机器筛选…",
+      "toolbar.allSources": "全部来源",
+      "toolbar.allModels": "全部模型",
+      "toolbar.showing": "显示 {shown} 条，共 {total} 条",
+      "pagination.page": "第 {current} / {total} 页",
+      "pagination.prev": "上一页",
+      "pagination.next": "下一页",
+      "pagination.first": "« 首页",
+      "pagination.last": "末页 »",
+      "pagination.rowsPerPage": "每页",
+      "footer.contact": "联系作者：",
+      "footer.note": "由 gh-usage 本地生成，数据不离开本机。",
+      "empty.records": "当前筛选下没有记录。",
+      "empty.data": "未发现使用记录。"
+    }
+  };
+  let CURRENT_LANG = "en";
+  const fmt = (s, vars) => s.replace(/\{(\w+)\}/g, (_, k) => (vars && k in vars) ? vars[k] : "{" + k + "}");
+  const t = (key, vars) => {
+    const dict = I18N[CURRENT_LANG] || I18N.en;
+    const raw = dict[key] != null ? dict[key] : (I18N.en[key] || key);
+    return vars ? fmt(raw, vars) : raw;
+  };
+
+  function applyStaticI18n() {
+    document.querySelectorAll("[data-i18n]").forEach(el => {
+      const key = el.getAttribute("data-i18n");
+      el.textContent = t(key);
+    });
+    document.querySelectorAll("[data-i18n-attr]").forEach(el => {
+      const spec = JSON.parse(el.getAttribute("data-i18n-attr") || "{}");
+      for (const [attr, key] of Object.entries(spec)) el.setAttribute(attr, t(key));
+    });
+    document.querySelectorAll(".lang-switch button").forEach(btn => {
+      btn.classList.toggle("active", btn.getAttribute("data-lang") === CURRENT_LANG);
+    });
+    document.documentElement.lang = (CURRENT_LANG === "zh") ? "zh-CN" : "en";
+  }
+
+  // ---------- data ----------
+  const PALETTE = ["#58a6ff", "#d2a8ff", "#3fb950", "#d29922", "#f85149", "#79c0ff", "#ff7b72", "#a5d6ff", "#56d364", "#ffa657"];
+  const RAW = JSON.parse(document.getElementById("gh-usage-data").textContent);
+  const RECORDS = (RAW && RAW.records) ? RAW.records : [];
+  const HOSTS = Array.from(new Set(RECORDS.map(r => r.hostname || RAW.primaryHost || "unknown-host"))).sort();
+  const HOST_COLOR = Object.fromEntries(HOSTS.map((h, i) => [h, PALETTE[i % PALETTE.length]]));
+  const SOURCES = Array.from(new Set(RECORDS.map(r => r.source))).sort();
+  const MODELS = Array.from(new Set(RECORDS.map(r => r.model).filter(Boolean))).sort();
+  const SELECTED_HOSTS = new Set(HOSTS);
+  let SELECTED_SOURCE = "";
+  let SELECTED_MODEL = "";
+  let FILTER_TEXT = "";
+  let PAGE_SIZE = 20;
+  let CURRENT_PAGE = 1;
+
+  // ---------- helpers ----------
+  function fmtNum(n, digits) {
+    if (n == null || isNaN(n)) return "—";
+    const d = digits == null ? (Math.abs(n) >= 100 ? 1 : 2) : digits;
+    return n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+  }
+  function dayKey(ms) {
+    if (ms == null) return null;
+    const d = new Date(ms);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+  function fmtDateTime(ms) {
+    if (ms == null) return "—";
+    const d = new Date(ms);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+  function escapeHtml(s) {
+    if (s == null) return "";
+    return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  }
+
+  // ---------- filtering ----------
+  function filteredRecords() {
+    const needle = FILTER_TEXT.trim().toLowerCase();
+    return RECORDS.filter(r => {
+      const host = r.hostname || "";
+      if (!SELECTED_HOSTS.has(host)) return false;
+      if (SELECTED_SOURCE && r.source !== SELECTED_SOURCE) return false;
+      if (SELECTED_MODEL && r.model !== SELECTED_MODEL) return false;
+      if (needle) {
+        const hay = [r.model, r.chat_title, host, r.source, r.details].filter(Boolean).join(" ").toLowerCase();
+        if (!hay.includes(needle)) return false;
+      }
+      return true;
+    });
+  }
+
+  // ---------- rendering ----------
+  function renderMachineList() {
+    const totals = {};
+    for (const r of RECORDS) {
+      const h = r.hostname || "unknown-host";
+      totals[h] = (totals[h] || 0) + (r.credits || 0);
+    }
+    const ul = document.getElementById("machine-list");
+    ul.innerHTML = "";
+
+    // "All" toggle
+    const liAll = document.createElement("li");
+    liAll.innerHTML = `<input type="checkbox" ${SELECTED_HOSTS.size === HOSTS.length ? "checked" : ""}>
+      <span class="host">${t("aside.all")}</span>`;
+    liAll.querySelector("input").addEventListener("change", e => {
+      if (e.target.checked) HOSTS.forEach(h => SELECTED_HOSTS.add(h));
+      else SELECTED_HOSTS.clear();
+      CURRENT_PAGE = 1;
+      renderAll();
+    });
+    ul.appendChild(liAll);
+
+    for (const h of HOSTS) {
+      const li = document.createElement("li");
+      li.innerHTML = `<input type="checkbox" ${SELECTED_HOSTS.has(h) ? "checked" : ""}>
+        <span class="swatch" style="background:${HOST_COLOR[h]}"></span>
+        <span class="host">${escapeHtml(h)}</span>
+        <span class="sub">${fmtNum(totals[h] || 0)}</span>`;
+      li.querySelector("input").addEventListener("change", e => {
+        if (e.target.checked) SELECTED_HOSTS.add(h);
+        else SELECTED_HOSTS.delete(h);
+        CURRENT_PAGE = 1;
+        renderAll();
+      });
+      ul.appendChild(li);
+    }
+  }
+
+  function renderSourceFilter() {
+    const sel = document.getElementById("source-filter");
+    while (sel.options.length > 1) sel.remove(1);
+    for (const s of SOURCES) {
+      const opt = document.createElement("option");
+      opt.value = s; opt.textContent = s;
+      sel.appendChild(opt);
+    }
+    const mSel = document.getElementById("model-filter");
+    while (mSel.options.length > 1) mSel.remove(1);
+    for (const m of MODELS) {
+      const opt = document.createElement("option");
+      opt.value = m; opt.textContent = m;
+      mSel.appendChild(opt);
+    }
+  }
+
+  function renderKpis(records) {
+    const totalCredits = records.reduce((sum, r) => sum + (r.credits || 0), 0);
+    const days = new Set();
+    let minDay = null, maxDay = null, lastTs = null;
+    const dayTotals = {};
+    for (const r of records) {
+      const k = dayKey(r.timestamp_ms);
+      if (k) {
+        days.add(k);
+        if (!minDay || k < minDay) minDay = k;
+        if (!maxDay || k > maxDay) maxDay = k;
+        if (lastTs == null || r.timestamp_ms > lastTs) lastTs = r.timestamp_ms;
+        dayTotals[k] = (dayTotals[k] || 0) + (r.credits || 0);
+      }
+    }
+    const active = days.size;
+    const avg = active > 0 ? totalCredits / active : 0;
+    let peakDay = null, peakVal = 0;
+    for (const [k, v] of Object.entries(dayTotals)) {
+      if (v > peakVal) { peakVal = v; peakDay = k; }
+    }
+    const hostCount = new Set(records.map(r => r.hostname || "unknown-host")).size;
+
+    document.getElementById("kpi-total").textContent = fmtNum(totalCredits, 2);
+    document.getElementById("kpi-days").textContent = active;
+    document.getElementById("kpi-records").textContent = records.length.toLocaleString();
+    document.getElementById("kpi-avg").textContent = fmtNum(avg, 2);
+
+    document.getElementById("kpi-total-sub").textContent =
+      minDay && maxDay ? `${minDay} → ${maxDay}` : t("kpi.noTime");
+    document.getElementById("kpi-days-sub").textContent =
+      lastTs ? t("kpi.lastSeen", { d: dayKey(lastTs) }) : "";
+    document.getElementById("kpi-records-sub").textContent =
+      t("kpi.acrossMachines", { n: hostCount });
+    document.getElementById("kpi-avg-sub").textContent =
+      peakDay ? t("kpi.peak", { v: fmtNum(peakVal, 2), d: peakDay }) : "";
+
+    document.getElementById("date-range").textContent =
+      minDay && maxDay ? `${minDay} → ${maxDay}` : t("kpi.noTime");
+  }
+
+  function renderDailyChart(records) {
+    const container = document.getElementById("daily-chart");
+    const legend = document.getElementById("daily-legend");
+    // aggregate by day and host
+    const byDay = {}; // day -> host -> credits
+    for (const r of records) {
+      const k = dayKey(r.timestamp_ms);
+      if (!k) continue;
+      const h = r.hostname || "unknown-host";
+      if (!byDay[k]) byDay[k] = {};
+      byDay[k][h] = (byDay[k][h] || 0) + (r.credits || 0);
+    }
+    const days = Object.keys(byDay).sort();
+    if (days.length === 0) {
+      container.innerHTML = `<div class="empty">${t("kpi.noTime")}</div>`;
+      legend.innerHTML = "";
+      return;
+    }
+    // determine max stacked total
+    let maxTotal = 0;
+    for (const d of days) {
+      const sum = Object.values(byDay[d]).reduce((s, v) => s + v, 0);
+      if (sum > maxTotal) maxTotal = sum;
+    }
+    const W = 720, H = 220, padL = 44, padR = 10, padT = 12, padB = 26;
+    const innerW = W - padL - padR, innerH = H - padT - padB;
+    const barGap = 2;
+    const barW = Math.max(2, Math.min(18, (innerW / days.length) - barGap));
+
+    // Y-axis ticks (4 levels)
+    const niceMax = niceCeil(maxTotal);
+    const tickCount = 4;
+    const ticks = [];
+    for (let i = 0; i <= tickCount; i++) ticks.push(niceMax * i / tickCount);
+
+    const activeHosts = HOSTS.filter(h => SELECTED_HOSTS.has(h));
+
+    let svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" width="100%" height="${H}">`;
+    // grid + Y labels
+    for (const tick of ticks) {
+      const y = padT + innerH - (innerH * (tick / (niceMax || 1)));
+      svg += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--grid)" stroke-width="1"/>`;
+      svg += `<text x="${padL-6}" y="${y+3}" fill="var(--text-dim)" font-size="10" text-anchor="end" font-family="inherit">${fmtNum(tick, tick >= 100 ? 0 : 1)}</text>`;
+    }
+    // bars
+    const step = innerW / days.length;
+    days.forEach((d, idx) => {
+      const x = padL + idx * step + (step - barW) / 2;
+      let cursorY = padT + innerH;
+      for (const h of activeHosts) {
+        const v = byDay[d][h] || 0;
+        if (v <= 0) continue;
+        const h_ = (innerH * (v / (niceMax || 1)));
+        cursorY -= h_;
+        svg += `<rect x="${x}" y="${cursorY}" width="${barW}" height="${h_}" fill="${HOST_COLOR[h]}">
+          <title>${d} · ${escapeHtml(h)} · ${fmtNum(v, 2)}</title></rect>`;
+      }
+    });
+    // X labels (first, last, ~3 middle)
+    const labelIdx = uniqueSorted([0, Math.floor(days.length/4), Math.floor(days.length/2), Math.floor(3*days.length/4), days.length-1]);
+    for (const idx of labelIdx) {
+      if (idx < 0 || idx >= days.length) continue;
+      const x = padL + idx * step + step/2;
+      svg += `<text x="${x}" y="${H-8}" fill="var(--text-dim)" font-size="10" text-anchor="middle" font-family="inherit">${days[idx]}</text>`;
+    }
+    svg += `</svg>`;
+    container.innerHTML = svg;
+
+    legend.innerHTML = activeHosts.map(h =>
+      `<span><span class="sw" style="background:${HOST_COLOR[h]};"></span>${escapeHtml(h)}</span>`
+    ).join("");
+  }
+
+  function niceCeil(v) {
+    if (v <= 0) return 1;
+    const pow = Math.pow(10, Math.floor(Math.log10(v)));
+    const n = v / pow;
+    let nice;
+    if (n <= 1) nice = 1;
+    else if (n <= 2) nice = 2;
+    else if (n <= 5) nice = 5;
+    else nice = 10;
+    return nice * pow;
+  }
+  function uniqueSorted(arr) {
+    return Array.from(new Set(arr)).sort((a, b) => a - b);
+  }
+
+  function renderModelChart(records) {
+    const totals = {};
+    let total = 0;
+    for (const r of records) {
+      const m = r.model || "(unknown)";
+      totals[m] = (totals[m] || 0) + (r.credits || 0);
+      total += (r.credits || 0);
+    }
+    const entries = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+    const TOP = 4;
+    const top = entries.slice(0, TOP);
+    const restSum = entries.slice(TOP).reduce((s, e) => s + e[1], 0);
+    if (restSum > 0) top.push([t("charts.others"), restSum]);
+
+    const container = document.getElementById("model-chart");
+    const legend = document.getElementById("model-legend");
+    if (total <= 0) {
+      container.innerHTML = `<div class="empty">${t("empty.data")}</div>`;
+      legend.innerHTML = "";
+      return;
+    }
+
+    const R = 80, STROKE = 28, CX = 110, CY = 110;
+    const CIRC = 2 * Math.PI * R;
+    let offset = 0;
+    let segs = "";
+    top.forEach(([_, val], i) => {
+      const frac = val / total;
+      const len = CIRC * frac;
+      const color = PALETTE[i % PALETTE.length];
+      segs += `<circle r="${R}" fill="none" stroke="${color}" stroke-width="${STROKE}"
+        stroke-dasharray="${len.toFixed(2)} ${(CIRC-len).toFixed(2)}"
+        stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90)"/>`;
+      offset += len;
+    });
+    container.innerHTML = `<svg class="chart" viewBox="0 0 220 220" width="100%" height="220">
+      <g transform="translate(${CX},${CY})">
+        <circle r="${R}" fill="none" stroke="#21262d" stroke-width="${STROKE}"/>
+        ${segs}
+        <text text-anchor="middle" y="-4" fill="var(--text)" font-size="20" font-weight="700">${fmtNum(total, 1)}</text>
+        <text text-anchor="middle" y="16" fill="var(--text-dim)" font-size="11">${t("charts.credits")}</text>
+      </g>
+    </svg>`;
+
+    legend.innerHTML = top.map(([model, val], i) => {
+      const color = PALETTE[i % PALETTE.length];
+      const pct = total > 0 ? (val / total * 100) : 0;
+      return `<span><span class="sw" style="background:${color};"></span>${escapeHtml(model)} — ${fmtNum(val, 1)} (${pct.toFixed(1)}%)</span>`;
+    }).join("");
+  }
+
+  function renderByMachine(records) {
+    const stats = {}; // host -> { records, credits, days(Set), models(Map) }
+    for (const r of records) {
+      const h = r.hostname || "unknown-host";
+      if (!stats[h]) stats[h] = { records: 0, credits: 0, days: new Set(), models: {} };
+      const s = stats[h];
+      s.records += 1;
+      s.credits += (r.credits || 0);
+      const k = dayKey(r.timestamp_ms);
+      if (k) s.days.add(k);
+      const m = r.model || "(unknown)";
+      s.models[m] = (s.models[m] || 0) + (r.credits || 0);
+    }
+    const totalCredits = Object.values(stats).reduce((s, v) => s + v.credits, 0);
+    const rows = Object.entries(stats).sort((a, b) => b[1].credits - a[1].credits);
+    const body = document.getElementById("by-machine-body");
+    if (rows.length === 0) {
+      body.innerHTML = `<tr><td colspan="6" class="empty">${t("empty.data")}</td></tr>`;
+      return;
+    }
+    body.innerHTML = rows.map(([host, s]) => {
+      const topModel = Object.entries(s.models).sort((a, b) => b[1] - a[1])[0];
+      const share = totalCredits > 0 ? (s.credits / totalCredits * 100) : 0;
+      return `<tr>
+        <td><span class="chip host">${escapeHtml(host)}</span></td>
+        <td class="num">${s.records}</td>
+        <td class="num">${s.days.size}</td>
+        <td>${topModel ? `<span class="chip model">${escapeHtml(topModel[0])}</span>` : "—"}</td>
+        <td class="num">${fmtNum(s.credits, 2)}</td>
+        <td class="num">${share.toFixed(1)}%</td>
+      </tr>`;
+    }).join("");
+  }
+
+  function renderRecordsTable(records) {
+    const body = document.getElementById("records-body");
+    const count = document.getElementById("records-count");
+    count.textContent = t("toolbar.showing", { shown: records.length.toLocaleString(), total: RECORDS.length.toLocaleString() });
+
+    if (records.length === 0) {
+      body.innerHTML = `<tr><td colspan="6" class="empty">${t("empty.records")}</td></tr>`;
+      renderPagination(0);
+      return;
+    }
+    const sorted = records.slice().sort((a, b) => (b.timestamp_ms || 0) - (a.timestamp_ms || 0));
+    const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+    if (CURRENT_PAGE > totalPages) CURRENT_PAGE = totalPages;
+    if (CURRENT_PAGE < 1) CURRENT_PAGE = 1;
+    const start = (CURRENT_PAGE - 1) * PAGE_SIZE;
+    const slice = sorted.slice(start, start + PAGE_SIZE);
+
+    body.innerHTML = slice.map(r => `
+      <tr>
+        <td>${escapeHtml(fmtDateTime(r.timestamp_ms))}</td>
+        <td><span class="chip host">${escapeHtml(r.hostname || "unknown-host")}</span></td>
+        <td><span class="chip model">${escapeHtml(r.model || "")}</span></td>
+        <td>${escapeHtml(r.chat_title || "")}</td>
+        <td class="num">${fmtNum(r.credits, 2)}</td>
+        <td>${escapeHtml(r.source || "")}</td>
+      </tr>
+    `).join("");
+    renderPagination(totalPages);
+  }
+
+  function renderPagination(totalPages) {
+    const el = document.getElementById("pagination");
+    if (totalPages <= 1) {
+      el.innerHTML = "";
+      return;
+    }
+    const mkBtn = (label, disabled, onClick) =>
+      `<button class="pg-btn" ${disabled ? "disabled" : ""} data-action="${onClick}">${label}</button>`;
+    el.innerHTML = `
+      ${mkBtn(t("pagination.first"), CURRENT_PAGE === 1, "first")}
+      ${mkBtn(t("pagination.prev"), CURRENT_PAGE === 1, "prev")}
+      <span style="font-size:12px;color:var(--text-dim);padding:0 8px;">${t("pagination.page", { current: CURRENT_PAGE, total: totalPages })}</span>
+      ${mkBtn(t("pagination.next"), CURRENT_PAGE === totalPages, "next")}
+      ${mkBtn(t("pagination.last"), CURRENT_PAGE === totalPages, "last")}
+    `;
+    el.querySelectorAll("button.pg-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const action = btn.getAttribute("data-action");
+        if (action === "first") CURRENT_PAGE = 1;
+        else if (action === "prev") CURRENT_PAGE = Math.max(1, CURRENT_PAGE - 1);
+        else if (action === "next") CURRENT_PAGE = Math.min(totalPages, CURRENT_PAGE + 1);
+        else if (action === "last") CURRENT_PAGE = totalPages;
+        renderRecordsTable(filteredRecords());
+      });
+    });
+  }
+
+  function renderSummaryLine() {
+    document.getElementById("summary-line").textContent =
+      t("header.summary", { machines: HOSTS.length, records: RECORDS.length.toLocaleString() });
+  }
+
+  // ---------- main render ----------
+  function renderAll() {
+    const recs = filteredRecords();
+    renderKpis(recs);
+    renderDailyChart(recs);
+    renderModelChart(recs);
+    renderByMachine(recs);
+    renderRecordsTable(recs);
+  }
+
+  function applyLang(lang) {
+    CURRENT_LANG = (lang === "zh") ? "zh" : "en";
+    try { localStorage.setItem("gh-usage.lang", CURRENT_LANG); } catch (_) {}
+    applyStaticI18n();
+    renderSummaryLine();
+    renderMachineList();
+    renderAll();
+  }
+
+  // wire events
+  document.querySelectorAll(".lang-switch button").forEach(btn => {
+    btn.addEventListener("click", () => applyLang(btn.getAttribute("data-lang")));
+  });
+  document.getElementById("filter").addEventListener("input", e => {
+    FILTER_TEXT = e.target.value || "";
+    CURRENT_PAGE = 1;
+    renderRecordsTable(filteredRecords());
+  });
+  document.getElementById("source-filter").addEventListener("change", e => {
+    SELECTED_SOURCE = e.target.value || "";
+    CURRENT_PAGE = 1;
+    renderAll();
+  });
+  document.getElementById("model-filter").addEventListener("change", e => {
+    SELECTED_MODEL = e.target.value || "";
+    CURRENT_PAGE = 1;
+    renderAll();
+  });
+  document.getElementById("page-size").addEventListener("change", e => {
+    const n = parseInt(e.target.value, 10);
+    PAGE_SIZE = isNaN(n) ? 20 : n;
+    CURRENT_PAGE = 1;
+    renderRecordsTable(filteredRecords());
+  });
+
+  // boot
+  document.getElementById("generated-at").textContent = RAW && RAW.generatedAt ? RAW.generatedAt : "—";
+  renderSourceFilter();
+
+  let initialLang = "en";
+  try { initialLang = localStorage.getItem("gh-usage.lang") || "en"; } catch (_) {}
+  applyLang(initialLang);
+</script>
+
+</body>
+</html>

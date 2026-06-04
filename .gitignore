@@ -9,3 +9,13 @@
 Thumbs.db
 .vscode/
 .idea/
+
+# Local agent / skill directories (not part of the project)
+skills/
+.skills/
+.agents/
+.claude/
+.copilot/
+SKILL.md
+*.skill.md
+
