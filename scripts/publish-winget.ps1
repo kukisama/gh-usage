@@ -190,6 +190,8 @@ function Get-ExistingWingetPullRequests {
     $pullRequestTitle = "$PackageIdentifier version $PackageVersion"
     $output = & gh search prs $pullRequestTitle --repo microsoft/winget-pkgs --state open --match title --json number,title,url,author --limit 10
     if ($LASTEXITCODE -ne 0) {
+        Write-Host "Hint: this search targets microsoft/winget-pkgs. If GitHub returned a permission or 'cannot be searched' error, your token may need Microsoft organization SAML SSO authorization." -ForegroundColor Yellow
+        Write-Host "      Check: gh api -i repos/microsoft/winget-pkgs (look for the X-GitHub-SSO header) and authorize SSO at https://github.com/settings/tokens if needed." -ForegroundColor Yellow
         throw "Failed to search for existing winget pull requests. Rerun with -ForceSubmit only if you have manually confirmed there is no duplicate open PR."
     }
 
@@ -367,6 +369,8 @@ if ($Submit) {
     Write-Host "Submitting manifest with wingetcreate..." -ForegroundColor Cyan
     wingetcreate submit $manifestDir
     if ($LASTEXITCODE -ne 0) {
+        Write-Host "Hint: wingetcreate uses its own GitHub token. If the error mentions 'SAML enforcement', 'SSO', or links to /enterprises/.../sso?authorization_request=, you must authorize that token for the Microsoft organization." -ForegroundColor Yellow
+        Write-Host "      Open the SSO URL printed above in a browser, complete Microsoft SSO authorization, then rerun: .\scripts\publish-winget.ps1 -Version $releaseVersion -Submit" -ForegroundColor Yellow
         throw 'wingetcreate submit failed.'
     }
 } else {
