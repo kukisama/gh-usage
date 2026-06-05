@@ -104,6 +104,26 @@ The target GitHub Release must already exist and include the expected Windows zi
 
 ## Quick start
 
+For a normal update after the GitHub Release has completed, the core flow is:
+
+1. Confirm the GitHub Release exists and includes the Windows zip plus checksum file.
+2. Generate and validate the winget manifest.
+3. Submit the validated manifest to `microsoft/winget-pkgs`.
+
+For example, after release `v1.1.0` is available:
+
+```powershell
+.\scripts\publish-winget.ps1 -Version 1.1.0 -Validate
+```
+
+Then submit:
+
+```powershell
+.\scripts\publish-winget.ps1 -Version 1.1.0 -Submit
+```
+
+The GitHub Release step happens before this script. This script only prepares, validates, and submits the winget package metadata for an already released version.
+
 Generate the manifest only:
 
 ```powershell

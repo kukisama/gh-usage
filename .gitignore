@@ -1,4 +1,5 @@
 /target/
+/dist/
 /copilot-usage.csv
 /copilot-usage.json
 /gh-usage.csv
