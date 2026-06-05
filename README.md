@@ -1,256 +1,189 @@
 # gh-usage
 
-`gh-usage` is a small command-line tool that scans local GitHub Copilot / Copilot Chat records and exports credit usage details.
+English | [简体中文](README.zh-CN.md)
 
-It is intended for local inspection only. The result is based on records available on the current machine and is not a replacement for GitHub billing or official usage reports.
+Fast local GitHub Copilot usage reports from VS Code and Copilot CLI records.
 
-## Why this exists
+`gh-usage` helps individuals and teams understand local GitHub Copilot credit usage without waiting for a central report. It scans usage records already stored on the machine, summarizes the results, and writes both spreadsheet-friendly CSV data and a self-contained HTML report.
 
-GitHub Copilot usage data can be useful for local review, troubleshooting, and rough usage analysis. This tool helps answer basic questions such as:
+It is designed for local analysis, internal review, and operational visibility. It is not a replacement for GitHub billing or official usage reports.
 
-- How many Copilot credits were found locally?
-- Which days had usage?
-- How many records were found?
-- Where are the detailed records stored?
+## What it helps answer
 
-## Advantages
+- How many Copilot credits were found on this machine?
+- Which days had the highest usage?
+- Which models and sources contributed to the usage?
+- Which chats or sessions created the detailed records?
+- How does usage compare across multiple machines?
+- Can the results be shared as a simple report without setting up a server?
 
-- Fast scanning, implemented in Rust.
-- Accurate extraction from local records that contain credit details.
-- CSV output by default for Excel and spreadsheet workflows.
-- Optional JSON output for scripts and automation.
-- Simple single-binary usage after building.
-- Supports Windows, Linux, and macOS default VS Code data paths.
+## Highlights
+
+- **Local-first:** scans files already available on the current machine.
+- **Fast:** implemented in Rust and suitable for large VS Code history folders.
+- **Business-readable output:** prints a compact terminal summary and writes an HTML report for review.
+- **Spreadsheet-ready details:** exports CSV by default, with optional JSON for automation.
+- **Multi-machine aggregation:** combines CSV files from multiple computers into one merged report.
+- **Cross-platform:** supports Windows, Linux, and macOS VS Code data locations.
 
 ## Install
 
-### Windows (winget)
+### Windows
 
-The package is published to the official [winget-pkgs](https://github.com/microsoft/winget-pkgs) repository as `gh-usage`.
+Install from Windows Package Manager:
 
 ```powershell
 winget install gh-usage
-
 ```
 
-Upgrade to the latest version:
+Upgrade later:
 
 ```powershell
 winget upgrade gh-usage
 ```
 
-Uninstall:
+### Linux and macOS
+
+Download the matching archive from the [Releases page](https://github.com/kukisama/gh-usage/releases), extract it, and run the `gh-usage` binary.
+
+## Quick start
+
+Run a local scan:
 
 ```powershell
-winget uninstall gh-usage
+gh-usage
 ```
 
-After installation, the `gh-usage` command is available on `PATH`:
+By default, the command writes two files in the current directory:
 
-```powershell
-gh-usage --help
-```
+- `copilot-usage-<machine>.csv`: detailed records for spreadsheet analysis
+- `copilot-usage-<machine>.html`: an interactive report for review and sharing
 
-> Note: It may take some time for a newly merged manifest to propagate to the winget source. If `winget install` reports the package was not found, run `winget source update` and try again later.
-
-### Other platforms
-
-Download the prebuilt archive for your OS from the [Releases page](https://github.com/kukisama/gh-usage/releases), or build from source (see below).
-
-## Build
-
-Build the optimized release binary:
-
-```powershell
-.\scripts\build-release.ps1
-```
-
-Or use Cargo directly on any supported platform:
-
-```powershell
-cargo build --release -p gh-usage
-```
-
-The binary is generated under:
+The terminal also prints a compact summary:
 
 ```text
-target/release/
++- GitHub Copilot Usage ---------------------------------+
+| records                489  scanned files           82 |
+| total credits      60122.2  candidate lines         49 |
+| active days             14  parse errors             0 |
+| avg / day           4294.4  total time          1.05 s |
++- Daily credits ----------------------------------------+
+| 2026-06-02     74 records     10053.30 credits         |
+| 2026-06-03     30 records      2942.00 credits         |
+| 2026-06-04     42 records      2159.50 credits         |
++- Files ------------------------------------------------+
+| csv   .\copilot-usage-workstation.csv                  |
+| html  .\copilot-usage-workstation.html                 |
++--------------------------------------------------------+
 ```
 
-## Release packaging
+The numbers above are examples. Your report depends on the local records available on your machine.
 
-The repository includes a GitHub Actions release workflow at `.github/workflows/release.yml`.
+The generated HTML report looks like this:
 
-To publish a new release, update the `version` field in `Cargo.toml` and push that commit to `main` or `master`. The workflow will:
+![gh-usage HTML report (English)](design/image1.png)
 
-1. Resolve the release tag as `v<version>`.
-2. Run the test suite.
-3. Build optimized executables on Windows, Linux, and macOS.
-4. Create the git tag if it does not already exist.
-5. Publish or update the GitHub Release assets.
+## HTML report
 
-Release assets include:
+The HTML report is self-contained and can be opened in any browser. It includes:
 
-- `gh-usage-v<version>-windows-<arch>.zip`: Windows executable with README and license
-- `gh-usage-v<version>-linux-<arch>.zip`: Linux executable with README and license
-- `gh-usage-v<version>-macos-<arch>.zip`: macOS executable with README and license
-- `gh-usage-v<version>-source.zip`: source archive for the released commit
-- `gh-usage-v<version>-checksums.txt`: SHA256 checksums
+- total records, total credits, active days, and average credits per active day
+- daily usage chart
+- model and source breakdowns
+- per-machine summary when merged data is available
+- searchable and filterable record table
+- pagination for large reports
+- language toggle for the report UI
 
-You can also publish by pushing a tag such as `v0.1.0`, or by running the workflow manually from GitHub Actions.
+No server, database, or internet connection is required to view the generated report.
 
-## Basic usage
+## CSV details
 
-Run without arguments:
+The CSV contains one row per extracted usage record. Commonly used columns include:
 
-```powershell
-.\target\release\gh-usage.exe
-```
+- `hostname`: machine that produced the record
+- `local_time_hint`: local timestamp when available
+- `chat_title`: chat title when available
+- `source`: record source, such as VS Code chat history or Copilot CLI logs
+- `model`: model name parsed from the record
+- `credits`: credits consumed by the record
+- `details`: raw credit detail text
+- `file`: local source file scanned
+- `line`: source line number
 
-On Linux or macOS, run:
+CSV files include a UTF-8 BOM by default for better Windows Excel compatibility. Use `--no-bom` to disable it.
 
-```sh
-./target/release/gh-usage
-```
-
-By default, the tool:
-
-1. Prints a usage summary.
-2. Writes detailed records to `copilot-usage.csv` in the current directory.
-
-You can also double-click the release executable on Windows. In that case, the tool keeps the console window open at the end so you can read the message before closing it.
-
-## Output example
-
-```text
-GitHub Copilot usage summary
-output=copilot-usage.csv
-records=101
-total_credits=16679.800
-active_days=2
-avg_credits_per_active_day=8339.900
-
-daily_credits:
-  2026-05-17 records=25 credits=5558.600
-  2026-05-18 records=76 credits=11121.200
-
-scan_stats:
-  scanned_files=774
-  scanned_lines=73660
-  candidate_lines=179
-  parse_errors=0
-
-timing_ms:
-  discover_ms=11
-  scan_ms=2074
-  reduce_ms=0
-  write_ms=0
-  total_ms=2087
-```
-
-## Common commands
-
-Show help:
-
-```powershell
-.\target\release\gh-usage.exe --help
-```
-
-Write CSV to a custom path:
-
-```powershell
-.\target\release\gh-usage.exe --output .\target\gh-usage.csv --summary
-```
-
-Scan only files modified in the last 7 days:
-
-```powershell
-.\target\release\gh-usage.exe --since-days 7 --output .\target\gh-usage-last-7-days.csv --summary
-```
+## Common usage scenarios
 
 Include GitHub Copilot CLI logs:
 
 ```powershell
-.\target\release\gh-usage.exe --include-cli-logs --output .\target\gh-usage-with-cli.csv --summary
+gh-usage --include-cli-logs
 ```
 
-Export JSON:
+Scan only recent records:
 
 ```powershell
-.\target\release\gh-usage.exe --format json --output .\target\gh-usage.json --summary
+gh-usage --since-days 7
 ```
 
-Measure runtime in PowerShell:
+Write to a specific location:
 
 ```powershell
-Measure-Command { .\target\release\gh-usage.exe --output .\target\gh-usage.csv --summary }
+gh-usage --output .\reports\copilot-usage.csv --html .\reports\copilot-usage.html
 ```
 
-## Merge CSVs from multiple machines
-
-When you run `gh-usage` on several machines, each one writes its own
-`copilot-usage-<machine>.csv`. Drop those CSVs into a single folder and
-combine them into one self-contained HTML report:
+Export JSON instead of CSV:
 
 ```powershell
-# Merge every copilot-usage-*.csv in the current directory
-.\target\release\gh-usage.exe --merge
-
-# ... or in a specific folder. The merged HTML is written next to the CSVs.
-.\target\release\gh-usage.exe --merge .\shared\copilot-usage
+gh-usage --format json --output .\reports\copilot-usage.json --no-html
 ```
 
-Behaviour:
+Skip the HTML report:
 
-- Reads every `copilot-usage-*.csv` in the target directory (the merged
-  output `copilot-usage-merged.csv` itself, if present, is skipped).
-- Skips the local VS Code scan entirely - merge mode is purely an
-  aggregator.
-- Deduplicates records by `hostname + file + line + response_id + details`,
-  so re-running with the same CSVs is safe.
-- Writes `copilot-usage-merged.html` to the target directory. The report
-  still has the host sidebar, model / source filters, and pagination, now
-  driven by every machine you supplied.
-- When double-clicked, the same "press any key to open the report" flow
-  applies.
+```powershell
+gh-usage --no-html
+```
 
-## CSV fields
+## Merge reports from multiple machines
 
-The CSV contains one row per extracted usage record. Important fields include:
+When several machines are involved, run `gh-usage` on each one and collect the generated `copilot-usage-<machine>.csv` files into a single folder.
 
-- `local_time_hint`: local timestamp when available
-- `chat_title`: chat title when available
-- `model`: model name parsed from the record
-- `model_id`: model identifier when available
-- `credits`: credits consumed by the record
-- `details`: raw credit detail text
-- `file`: source file scanned
-- `line`: source line number
+Then run:
 
-CSV files include a UTF-8 BOM by default for better compatibility with Windows Excel. Use `--no-bom` to disable it.
+```powershell
+gh-usage --merge .\shared\copilot-usage
+```
 
-## Notes
+Merge mode:
 
-- The tool scans local files only.
-- By default, it looks under the standard VS Code `workspaceStorage` location for the current OS.
-- Missing or deleted local history cannot be reconstructed.
+- reads every `copilot-usage-*.csv` file in the target folder
+- skips local scanning entirely
+- deduplicates repeated records
+- writes `copilot-usage-merged.html` next to the CSV files
+- keeps machine-level filtering and summaries in the report
+
+This is useful for team reviews, device migrations, or comparing usage across a workstation and a laptop.
+
+## Data scope and limitations
+
+- `gh-usage` scans local files only.
+- It uses the standard VS Code user-data location for the current OS unless a custom path is provided.
+- Deleted or unavailable local history cannot be reconstructed.
 - Records without credit details are ignored.
-- Results are useful for local analysis and rough comparison, not official accounting.
+- Results are intended for analysis and rough comparison, not official accounting.
 
-## Changelog (business view)
+## Useful options
 
-Recent updates, described from a "what does this mean for me" perspective rather than the underlying implementation.
+```text
+--include-cli-logs       Include GitHub Copilot CLI records
+--since-days <N>         Only scan files modified within the last N days
+--output <PATH>          Write CSV or JSON to a specific path
+--html <PATH>            Write the HTML report to a specific path
+--no-html                Do not generate the HTML report
+--merge [DIR]            Merge existing copilot-usage-*.csv files into one report
+--format csv|json        Choose output format
+--hostname <NAME>        Override the machine name stored in records
+```
 
-### 2026-06 · Interactive HTML report, bilingual UI, machine-aware aggregation
-
-- **One-click interactive report.** Each run now produces a self-contained `.html` next to the CSV. Open it in any browser - no server, no internet, no plugins - to see total credits, active days, a daily stacked-bar chart, a model breakdown donut, a per-machine summary table, and a searchable record list. Safe to email or archive as a single file.
-- **Cross-machine merge in one command.** Drop several machines' `copilot-usage-<host>.csv` files into a folder and run `gh-usage --merge` (or `--merge <dir>`). It combines all of them, deduplicates, and writes a single `copilot-usage-merged.html` next to the CSVs - no scanning of the local machine and no manual concatenation required.
-- **English / 中文 toggle.** A language switch lives in the top-right corner of the report. Default is English; the choice is remembered in the browser for next time.
-- **Filter and drill down.** The report includes a sidebar with one checkbox per machine, plus a toolbar with a free-text search box, a model dropdown, and a source dropdown. Anything you uncheck or filter is immediately removed from the charts and totals.
-- **Pagination for long record lists.** The bottom record table now shows 20 rows per page (toggle to 10 / 50 / 100) with First / Prev / Next / Last controls, so even thousands of records stay readable.
-- **Machine-aware output.** Every record now carries a `hostname` column, and the default file name is `copilot-usage-<machine>.csv`. Drop CSVs from several machines into one folder and merge them later without losing track of which laptop or workstation each row came from.
-- **Better chat titles.** Previously some sessions showed an empty `chat_title` because VS Code stores certain chat history as a single large JSON document with the title nested inside. The scanner now finds those titles too, so the records table is much more informative.
-- **Compact end-of-run summary.** Output is reorganized into a fixed-width table that fits an 80-column terminal: a 2x4 KPI grid, a daily credits section, and a files section. Less scrolling, easier to screenshot, same information.
-- **Friendlier double-click flow.** When you launch the executable from Explorer, the console now explains what the CSV and HTML are for, then waits for any key to open the HTML in your default browser. Closing the window also works - both files are already on disk. Pass `--no-html` to skip the HTML and only keep the CSV.
-- **Get in touch.** The HTML footer now includes a contact link and a GitHub project link, so anyone you share the report with can easily reach back or check for updates.
-
+Run `gh-usage --help` for the full command reference.

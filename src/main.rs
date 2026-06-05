@@ -158,7 +158,10 @@ struct RawUsageRecord {
 fn main() -> Result<()> {
     let total_started = Instant::now();
     let no_args = env::args_os().len() == 1;
-    let double_clicked = no_args && launched_from_explorer();
+    // Originally gated on `launched_from_explorer()` so we'd only prompt on
+    // double-click. Now we also prompt for plain `gh-usage.exe` runs in any
+    // terminal, so the user always gets the HTML auto-open offer.
+    let double_clicked = no_args;
     let cli = Cli::parse();
 
     if let Some(dir) = cli.merge.clone() {
@@ -332,7 +335,11 @@ fn open_path(path: &Path) {
 #[cfg(not(windows))]
 fn open_path(_path: &Path) {}
 
+// Retained for potential future use (e.g. tailoring messaging when launched
+// from Explorer vs. a terminal). Currently unused since we always show the
+// prompt for argument-less runs.
 #[cfg(windows)]
+#[allow(dead_code)]
 fn launched_from_explorer() -> bool {
     windows_parent_process_name()
         .as_deref()
@@ -340,6 +347,7 @@ fn launched_from_explorer() -> bool {
 }
 
 #[cfg(not(windows))]
+#[allow(dead_code)]
 fn launched_from_explorer() -> bool {
     false
 }
@@ -386,6 +394,7 @@ fn wait_for_any_key() {
 fn wait_for_any_key() {}
 
 #[cfg(windows)]
+#[allow(dead_code)]
 fn windows_parent_process_name() -> Option<String> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
@@ -443,6 +452,7 @@ fn windows_parent_process_name() -> Option<String> {
 }
 
 #[cfg(windows)]
+#[allow(dead_code)]
 fn wide_process_name_to_string(buffer: &[u16]) -> Option<String> {
     let len = buffer.iter().position(|ch| *ch == 0).unwrap_or(buffer.len());
     if len == 0 {
