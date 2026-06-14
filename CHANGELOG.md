@@ -1,6 +1,6 @@
 # Changelog
 
-English | [简体中文](CHANGELOG.zh-CN.md)
+English | [简体中文](design/CHANGELOG.zh-CN.md)
 
 All notable changes to **gh-usage** are documented here, written from your point of view — what's new, what got better, and why it matters.
 

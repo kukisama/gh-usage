@@ -1,6 +1,6 @@
 # gh-usage · 一眼看懂你的 Copilot 用量
 
-[English](README.md) | 简体中文
+[English](../README.md) | 简体中文
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange.svg?logo=rust)](https://www.rust-lang.org/)
@@ -10,7 +10,7 @@
 > 一条命令，把本机零散的 GitHub Copilot 使用记录，整理成一份可视化报告。
 > 不上传、不联网，数据始终留在你自己的电脑上。
 
-![gh-usage 报告总览](design/01.jpg)
+![gh-usage 报告总览](01.jpg)
 
 ---
 
@@ -55,31 +55,31 @@
 
 总额度、活跃天数、记录条数、日均用量、AI 交互总时长、单次平均时长，关键数字都集中在顶部。
 
-![核心指标卡片](design/dashboard-kpi.jpg)
+![核心指标卡片](dashboard-kpi.jpg)
 
 ### 趋势与模型分布
 
 每日用量柱状图帮你看出哪几天最忙，环形图直观展示各模型的占比。
 
-![每日趋势与模型占比](design/dashboard-charts.jpg)
+![每日趋势与模型占比](dashboard-charts.jpg)
 
 ### 按项目、会话深入
 
 项目维度的横向条形图支持点击筛选，配合「最高消耗会话」榜单，定位用量都花在了哪里。
 
-![按项目与高消耗会话](design/dashboard-project.jpg)
+![按项目与高消耗会话](dashboard-project.jpg)
 
 ### 可搜索、可筛选的明细表
 
 明细记录表支持关键词搜索、按模型/来源筛选、点击表头排序和分页。下图开启了隐私模式，敏感字段已自动打码。
 
-![明细记录表（已开启隐私遮蔽）](design/dashboard-records.jpg)
+![明细记录表（已开启隐私遮蔽）](dashboard-records.jpg)
 
 ### 侧边栏筛选
 
 左侧可按机器、项目、日期范围勾选，报告实时联动，无需额外配置。
 
-![侧边栏筛选](design/dashboard-sidebar.jpg)
+![侧边栏筛选](dashboard-sidebar.jpg)
 
 ### 一键截图分享
 
@@ -197,7 +197,7 @@ gh-usage --merge .\shared\copilot-usage
 
 ## 📜 许可
 
-本项目基于 [MIT 许可证](LICENSE) 开源，可自由使用、修改和分发。
+本项目基于 [MIT 许可证](../LICENSE) 开源，可自由使用、修改和分发。
 
 ## 🤝 贡献
 

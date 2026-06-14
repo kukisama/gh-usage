@@ -1,6 +1,6 @@
 # gh-usage · See your Copilot usage at a glance
 
-English | [简体中文](README.zh-CN.md)
+English | [简体中文](design/README.zh-CN.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange.svg?logo=rust)](https://www.rust-lang.org/)

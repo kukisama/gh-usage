@@ -1,6 +1,6 @@
 # 更新日志
 
-[English](CHANGELOG.md) | 简体中文
+[English](../CHANGELOG.md) | 简体中文
 
 这里记录 **gh-usage** 每个版本的重要变化，站在你的角度讲清楚：有什么新功能、哪里变好了、对你有什么用。
 
