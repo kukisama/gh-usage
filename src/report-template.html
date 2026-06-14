@@ -56,6 +56,9 @@
   }
   .icon-btn:hover { color: var(--text); border-color: var(--text-dim); text-decoration: none; }
   .icon-btn svg { width: 16px; height: 16px; fill: currentColor; }
+  .icon-btn:disabled { opacity: 0.7; cursor: progress; }
+  @keyframes gh-spin { to { transform: rotate(360deg); } }
+  #screenshot-btn.spinning #screenshot-spinner { animation: gh-spin 0.8s linear infinite; transform-origin: 50% 50%; }
 
   main { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 50px); }
   aside { border-right: 1px solid var(--border); background: var(--bg-elev); padding: 16px; }
@@ -76,7 +79,7 @@
 
   .section { padding: 22px 28px; }
 
-  .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px; }
+  .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 14px; margin-bottom: 18px; }
   .kpi { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
   .kpi .label { color: var(--text-dim); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
   .kpi .value { font-size: 26px; font-weight: 700; margin-top: 6px; font-variant-numeric: tabular-nums; }
@@ -127,6 +130,155 @@
   }
   .pg-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
   .pg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ---- slicers / sidebar lists ---- */
+  .slicer-list { list-style: none; padding: 0; margin: 0 0 18px; max-height: 220px; overflow-y: auto; }
+  .slicer-list li {
+    padding: 5px 8px; border-radius: 6px; cursor: pointer;
+    display: flex; align-items: center; gap: 8px; font-size: 12.5px;
+  }
+  .slicer-list li:hover { background: var(--bg-elev2); }
+  .slicer-list input { accent-color: var(--accent); }
+  .slicer-list .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .slicer-list .sub { color: var(--text-dim); font-size: 11px; margin-left: auto; font-variant-numeric: tabular-nums; }
+
+  .date-slicer { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+  .date-slicer label { font-size: 11px; color: var(--text-dim); display: flex; flex-direction: column; gap: 3px; }
+  .date-slicer input[type=date] {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    padding: 5px 8px; border-radius: 6px; font: inherit; color-scheme: dark;
+  }
+
+  /* ---- active filter chips (PowerBI-style breadcrumb) ---- */
+  .filter-bar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-bottom: 16px; min-height: 30px;
+  }
+  .filter-bar .fb-label { color: var(--text-dim); font-size: 12px; }
+  .filter-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--bg-elev2); border: 1px solid var(--border);
+    border-radius: 999px; padding: 3px 6px 3px 10px; font-size: 12px;
+  }
+  .filter-chip .k { color: var(--text-dim); }
+  .filter-chip .x {
+    cursor: pointer; width: 16px; height: 16px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--text-dim); border: 1px solid var(--border); line-height: 1;
+  }
+  .filter-chip .x:hover { color: var(--text); border-color: var(--text-dim); }
+  .filter-bar .clear-all {
+    background: transparent; border: 1px solid var(--border); color: var(--text-dim);
+    border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer;
+  }
+  .filter-bar .clear-all:hover { color: var(--text); border-color: var(--text-dim); }
+
+  /* ---- clickable chart elements ---- */
+  rect.bar, circle.seg, .legend .clickable { cursor: pointer; }
+  rect.bar:hover { opacity: 0.85; }
+  rect.bar.dim, circle.seg.dim { opacity: 0.28; }
+  .legend .clickable { cursor: pointer; user-select: none; }
+  .legend .clickable.dim { opacity: 0.4; }
+
+  /* ---- session / round badge ---- */
+  .session-name { color: var(--text); }
+  .round-badge {
+    display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 10px;
+    font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap;
+    background: rgba(88, 166, 255, 0.12); color: var(--accent);
+  }
+  td.dur { font-variant-numeric: tabular-nums; color: var(--text-dim); }
+
+  /* ---- privacy mask ---- */
+  body.privacy-on .mask {
+    filter: blur(5px);
+    background: var(--text-dim);
+    border-radius: 4px;
+    color: transparent !important;
+    user-select: none;
+    transition: filter .12s ease;
+  }
+  body.privacy-on .mask * { color: transparent !important; }
+  .icon-btn.toggled { background: var(--accent); color: #0d1117; border-color: var(--accent); }
+
+  /* ---- source-file hover popover ---- */
+  .src-cell { position: relative; }
+  .src-trigger {
+    display: inline-flex; align-items: center; gap: 4px; cursor: help;
+    border-bottom: 1px dotted var(--text-dim);
+  }
+  .src-trigger .info { color: var(--text-dim); font-size: 11px; }
+  .path-pop {
+    position: absolute; z-index: 40; right: 0; bottom: calc(100% + 6px);
+    width: 460px; max-width: 60vw; padding: 10px;
+    background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    display: none; cursor: auto; text-align: left;
+  }
+  .src-cell:hover .path-pop, .path-pop:hover { display: block; }
+  .path-pop .path-text {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+    color: var(--text); word-break: break-all; line-height: 1.5;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 8px; margin-bottom: 8px; user-select: all;
+  }
+  .path-pop .path-text .ln { color: var(--accent); }
+  .path-pop .pop-actions { display: flex; gap: 8px; }
+  .path-pop .pop-actions button, .path-pop .pop-actions a {
+    font: inherit; font-size: 12px; cursor: pointer; text-decoration: none;
+    padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text);
+  }
+  .path-pop .pop-actions button:hover, .path-pop .pop-actions a:hover { border-color: var(--accent); color: var(--accent); }
+  .path-pop .pop-actions .copied { color: var(--ok, #3fb950); border-color: var(--ok, #3fb950); }
+
+  /* ---- Excel-style sortable / filterable column headers ---- */
+  #records-head th[data-col] { white-space: nowrap; }
+  #records-head th[data-col] .th-inner {
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  #records-head th.num .th-inner { flex-direction: row-reverse; }
+  .th-sort {
+    cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 3px;
+    color: inherit;
+  }
+  .th-sort:hover { color: var(--accent); }
+  .th-sort .arrow { font-size: 9px; opacity: 0.35; line-height: 1; }
+  .th-sort.sorted .arrow { opacity: 1; color: var(--accent); }
+  .th-funnel {
+    cursor: pointer; border: 0; background: transparent; color: var(--text-dim);
+    padding: 0 2px; font-size: 11px; line-height: 1; border-radius: 4px;
+  }
+  .th-funnel:hover { color: var(--accent); }
+  .th-funnel.active { color: var(--accent); }
+  .th-funnel.active::after { content: "●"; font-size: 7px; vertical-align: super; margin-left: 1px; }
+
+  .col-filter {
+    position: fixed; z-index: 60; width: 260px; max-height: 360px;
+    background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.55); display: none; flex-direction: column;
+    padding: 8px; text-transform: none; font-weight: 400;
+  }
+  .col-filter.open { display: flex; }
+  .col-filter .cf-search {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-bottom: 6px;
+  }
+  .col-filter .cf-actions { display: flex; gap: 8px; margin-bottom: 6px; }
+  .col-filter .cf-actions button {
+    flex: 1; font: inherit; font-size: 11px; cursor: pointer; padding: 4px 6px;
+    border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  }
+  .col-filter .cf-actions button:hover { border-color: var(--accent); color: var(--accent); }
+  .col-filter .cf-list { overflow-y: auto; flex: 1; margin: 0; padding: 0; list-style: none; }
+  .col-filter .cf-list li { margin: 0; }
+  .col-filter .cf-list label {
+    display: flex; align-items: center; gap: 7px; padding: 4px 6px; border-radius: 5px;
+    cursor: pointer; font-size: 12px; color: var(--text);
+  }
+  .col-filter .cf-list label:hover { background: var(--bg-elev2); }
+  .col-filter .cf-list .cf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .col-filter .cf-list .cf-count { margin-left: auto; color: var(--text-dim); font-size: 11px; }
 </style>
 </head>
 <body>
@@ -140,6 +292,26 @@
     </span>
   </div>
   <div class="right">
+    <button id="privacy-toggle" class="icon-btn" type="button"
+            data-i18n-attr='{"title":"privacy.toggle","aria-label":"privacy.toggle"}'
+            title="Privacy mask">
+      <svg id="privacy-icon-off" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M8 3C4.5 3 1.7 5.1.5 8 1.7 10.9 4.5 13 8 13s6.3-2.1 7.5-5C14.3 5.1 11.5 3 8 3zm0 8.3A3.3 3.3 0 1 1 8 4.7a3.3 3.3 0 0 1 0 6.6zM8 6.2A1.8 1.8 0 1 0 8 9.8 1.8 1.8 0 0 0 8 6.2z"/>
+      </svg>
+      <svg id="privacy-icon-on" viewBox="0 0 16 16" aria-hidden="true" style="display:none;">
+        <path d="M13.6 2.4 2.4 13.6l.9.9 1.7-1.7c.9.3 1.9.5 3 .5 3.5 0 6.3-2.1 7.5-5a9.3 9.3 0 0 0-3-3.6l1-1-.8-.8zM8 11.3a3.3 3.3 0 0 1-3.1-4.5l1.2 1.2A1.8 1.8 0 0 0 8 9.8l1.2 1.2c-.4.2-.8.3-1.2.3zM.5 8C1.3 6 2.7 4.4 4.5 3.5l1.6 1.6A3.3 3.3 0 0 0 8 11.3l1.1 1.1A7.9 7.9 0 0 1 8 12.5C4.5 12.5 1.7 10.5.5 8z"/>
+      </svg>
+    </button>
+    <button id="screenshot-btn" class="icon-btn" type="button"
+            data-i18n-attr='{"title":"shot.button","aria-label":"shot.button"}'
+            title="Save screenshot">
+      <svg id="screenshot-icon" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M5.6 2 4.7 3.4H2.2A1.7 1.7 0 0 0 .5 5.1v6.6a1.7 1.7 0 0 0 1.7 1.7h11.6a1.7 1.7 0 0 0 1.7-1.7V5.1a1.7 1.7 0 0 0-1.7-1.7h-2.5L10.4 2H5.6zM8 5.4a3 3 0 1 1 0 6 3 3 0 0 1 0-6zm0 1.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/>
+      </svg>
+      <svg id="screenshot-spinner" viewBox="0 0 16 16" aria-hidden="true" style="display:none;">
+        <path d="M8 1.5a6.5 6.5 0 1 0 6.5 6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </button>
     <a class="icon-btn" href="https://github.com/kukisama/gh-usage" target="_blank" rel="noopener"
        title="github.com/kukisama/gh-usage" aria-label="GitHub repository">
       <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -164,11 +336,23 @@
     <h2 data-i18n="aside.machines">Machines</h2>
     <ul id="machine-list" class="machine-list"></ul>
 
+    <h2 data-i18n="aside.projects">Projects</h2>
+    <ul id="project-list" class="slicer-list"></ul>
+
     <h2 data-i18n="aside.dateRange">Date range</h2>
-    <div id="date-range" style="font-size:12px;color:var(--text-dim);">—</div>
+    <div class="date-slicer">
+      <label data-i18n="slicer.from">From
+        <input type="date" id="date-from">
+      </label>
+      <label data-i18n="slicer.to">To
+        <input type="date" id="date-to">
+      </label>
+      <div id="date-range" style="font-size:11px;color:var(--text-dim);">—</div>
+    </div>
   </aside>
 
   <section class="section">
+    <div id="filter-bar" class="filter-bar"></div>
     <div class="kpi-row">
       <div class="kpi">
         <div class="label" data-i18n="kpi.total">Total credits</div>
@@ -190,6 +374,16 @@
         <div class="value" id="kpi-avg">0</div>
         <div class="delta" id="kpi-avg-sub"></div>
       </div>
+      <div class="kpi">
+        <div class="label" data-i18n="kpi.interactionTime">AI interaction time</div>
+        <div class="value" id="kpi-time">0</div>
+        <div class="delta" id="kpi-time-sub"></div>
+      </div>
+      <div class="kpi">
+        <div class="label" data-i18n="kpi.avgPerExchange">Avg / exchange</div>
+        <div class="value" id="kpi-avg-exchange">0</div>
+        <div class="delta" id="kpi-avg-exchange-sub"></div>
+      </div>
     </div>
 
     <div class="grid-2" style="margin-bottom:18px;">
@@ -202,6 +396,18 @@
         <h3 data-i18n="charts.byModel">By model</h3>
         <div id="model-chart"></div>
         <div id="model-legend" class="legend" style="flex-direction:column;gap:4px;"></div>
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-bottom:18px;">
+      <div class="card">
+        <h3 data-i18n="charts.byProject">By project</h3>
+        <div id="project-chart"></div>
+        <div id="project-legend" class="legend"></div>
+      </div>
+      <div class="card">
+        <h3 data-i18n="charts.topSessions">Top sessions</h3>
+        <div id="top-sessions"></div>
       </div>
     </div>
 
@@ -242,14 +448,17 @@
         </select>
         <span class="count" id="records-count"></span>
       </div>
-      <table>
-        <thead>
+      <table id="records-table">
+        <thead id="records-head">
           <tr>
-            <th data-i18n="cols.timeLocal">Time (local)</th>
-            <th data-i18n="cols.host">Host</th>
-            <th data-i18n="cols.model">Model</th>
-            <th data-i18n="cols.chatTitle">Chat title</th>
-            <th class="num" data-i18n="cols.credits">Credits</th>
+            <th data-col="time"></th>
+            <th data-col="host"></th>
+            <th data-col="project"></th>
+            <th data-col="model"></th>
+            <th data-col="session"></th>
+            <th data-col="round"></th>
+            <th class="num" data-col="credits"></th>
+            <th class="num" data-col="duration"></th>
             <th data-i18n="cols.source">Source</th>
           </tr>
         </thead>
@@ -280,6 +489,7 @@
   <div class="small" data-i18n="footer.note">Generated locally by gh-usage. Data stays on this machine.</div>
 </footer>
 
+<script>__GH_USAGE_SNAPDOM__</script>
 <script id="gh-usage-data" type="application/json">__GH_USAGE_DATA__</script>
 
 <script>
@@ -330,7 +540,54 @@
       "footer.contact": "Contact the author:",
       "footer.note": "Generated locally by gh-usage. Data stays on this machine.",
       "empty.records": "No records match the current filter.",
-      "empty.data": "No usage records found."
+      "empty.data": "No usage records found.",
+      "aside.projects": "Projects",
+      "slicer.from": "From",
+      "slicer.to": "To",
+      "privacy.toggle": "Privacy mask (blur machine & project names)",
+      "shot.button": "Save full-page screenshot (privacy mask applied)",
+      "shot.error": "Screenshot failed. Please try again.",
+      "kpi.interactionTime": "AI interaction time",
+      "kpi.avgPerExchange": "Avg / exchange",
+      "kpi.timedExchanges": "{n} timed exchange(s)",
+      "kpi.perExchangeHint": "wall-clock per exchange",
+      "charts.byProject": "By project (click to filter)",
+      "charts.topSessions": "Top sessions by credits",
+      "charts.noProject": "(no project)",
+      "charts.clickHint": "click to filter",
+      "cols.project": "Project",
+      "cols.session": "Session",
+      "cols.round": "Round",
+      "cols.duration": "Duration",
+      "filter.active": "Filters:",
+      "filter.clearAll": "Clear all",
+      "filter.host": "Machine",
+      "filter.project": "Project",
+      "filter.model": "Model",
+      "filter.source": "Source",
+      "filter.day": "Day",
+      "filter.dateFrom": "From",
+      "filter.dateTo": "To",
+      "filter.search": "Search",
+      "toolbar.allProjects": "All projects",
+      "session.turnOf": "turn {i} / {n}",
+      "session.round": "round {i} / {n}",
+      "session.roundOnly": "round {i}",
+      "session.untitled": "(untitled session)",
+      "source.copy": "Copy path",
+      "source.open": "Open",
+      "source.copied": "Copied!",
+      "colfilter.title": "Filter this column",
+      "colfilter.sortHint": "Click to sort",
+      "colfilter.search": "Search values…",
+      "colfilter.selectAll": "Select all",
+      "colfilter.clear": "Clear",
+      "sessions.exchanges": "{n} exchange(s)",
+      "sessions.colSession": "Session",
+      "sessions.colProject": "Project",
+      "sessions.colTurns": "Turns",
+      "sessions.colTime": "Time",
+      "sessions.colCredits": "Credits"
     },
     zh: {
       "app.title": "gh-usage 使用报告",
@@ -377,7 +634,54 @@
       "footer.contact": "联系作者：",
       "footer.note": "由 gh-usage 本地生成，数据不离开本机。",
       "empty.records": "当前筛选下没有记录。",
-      "empty.data": "未发现使用记录。"
+      "empty.data": "未发现使用记录。",
+      "aside.projects": "项目列表",
+      "slicer.from": "起始",
+      "slicer.to": "截止",
+      "privacy.toggle": "隐私遮蔽（虚化机器名与项目名）",
+      "shot.button": "保存整页截图（自动开启隐私遮蔽）",
+      "shot.error": "截图失败，请重试。",
+      "kpi.interactionTime": "AI 交互耗时",
+      "kpi.avgPerExchange": "单次均耗时",
+      "kpi.timedExchanges": "{n} 次有耗时记录",
+      "kpi.perExchangeHint": "每次沟通墙钟时间",
+      "charts.byProject": "按项目分布（点击筛选）",
+      "charts.topSessions": "顶部会话（按积分）",
+      "charts.noProject": "（无项目）",
+      "charts.clickHint": "点击筛选",
+      "cols.project": "项目",
+      "cols.session": "会话",
+      "cols.round": "轮次",
+      "cols.duration": "耗时",
+      "filter.active": "筛选：",
+      "filter.clearAll": "清除全部",
+      "filter.host": "机器",
+      "filter.project": "项目",
+      "filter.model": "模型",
+      "filter.source": "来源",
+      "filter.day": "日期",
+      "filter.dateFrom": "起始",
+      "filter.dateTo": "截止",
+      "filter.search": "搜索",
+      "toolbar.allProjects": "全部项目",
+      "session.turnOf": "第 {i} / {n} 次",
+      "session.round": "第 {i}/{n} 轮",
+      "session.roundOnly": "第 {i} 轮",
+      "session.untitled": "(未命名会话)",
+      "source.copy": "复制路径",
+      "source.open": "打开",
+      "source.copied": "已复制！",
+      "colfilter.title": "筛选此列",
+      "colfilter.sortHint": "点击排序",
+      "colfilter.search": "搜索值…",
+      "colfilter.selectAll": "全选",
+      "colfilter.clear": "清空",
+      "sessions.exchanges": "{n} 次沟通",
+      "sessions.colSession": "会话",
+      "sessions.colProject": "项目",
+      "sessions.colTurns": "轮次",
+      "sessions.colTime": "耗时",
+      "sessions.colCredits": "积分"
     }
   };
   let CURRENT_LANG = "en";
@@ -411,12 +715,79 @@
   const HOST_COLOR = Object.fromEntries(HOSTS.map((h, i) => [h, PALETTE[i % PALETTE.length]]));
   const SOURCES = Array.from(new Set(RECORDS.map(r => r.source))).sort();
   const MODELS = Array.from(new Set(RECORDS.map(r => r.model).filter(Boolean))).sort();
+  const NO_PROJECT = "\u0000__noproject__";
+  const projectOf = (r) => (r.project && String(r.project).trim()) ? r.project : NO_PROJECT;
+  const PROJECTS = Array.from(new Set(RECORDS.map(projectOf))).sort((a, b) => {
+    if (a === NO_PROJECT) return 1;
+    if (b === NO_PROJECT) return -1;
+    return a.localeCompare(b);
+  });
+  const PROJECT_COLOR = Object.fromEntries(PROJECTS.map((p, i) => [p, PALETTE[i % PALETTE.length]]));
+
+  // Friendly parent-session names from the chat title, so rows of the same
+  // session read as one group (e.g. "开发设计m1到m5 · round 8/8"). Repeated
+  // titles get a "#n" suffix so distinct sessions stay tellable apart.
+  const SESSION_NAME = (() => {
+    const meta = {}; // sid -> { title, firstTs }
+    for (const r of RECORDS) {
+      const sid = r.session_id;
+      if (!sid) continue;
+      const ts = r.timestamp_ms || 0;
+      if (!meta[sid]) meta[sid] = { title: "", firstTs: ts };
+      if (ts < meta[sid].firstTs) meta[sid].firstTs = ts;
+      const title = (r.chat_title || "").trim();
+      if (title && !meta[sid].title) meta[sid].title = title;
+    }
+    const byTitle = {};
+    for (const [sid, m] of Object.entries(meta)) {
+      (byTitle[m.title] = byTitle[m.title] || []).push(sid);
+    }
+    const out = {};
+    for (const sids of Object.values(byTitle)) {
+      sids.sort((a, b) => meta[a].firstTs - meta[b].firstTs);
+      sids.forEach((sid, i) => {
+        out[sid] = { base: meta[sid].title, idx: i + 1, count: sids.length };
+      });
+    }
+    return out;
+  })();
+  function sessionNameById(sid) {
+    if (!sid) return "";
+    const e = SESSION_NAME[sid];
+    if (!e) return shortId(sid);
+    const base = e.base || t("session.untitled");
+    return e.count > 1 ? `${base} #${e.idx}` : base;
+  }
+  const sessionName = (r) => sessionNameById(r && r.session_id);
+
   const SELECTED_HOSTS = new Set(HOSTS);
+  const SELECTED_PROJECTS = new Set(PROJECTS);
   let SELECTED_SOURCE = "";
   let SELECTED_MODEL = "";
+  let SELECTED_DAY = "";
+  let DATE_FROM = "";
+  let DATE_TO = "";
   let FILTER_TEXT = "";
+  let PRIVACY_ON = false;
   let PAGE_SIZE = 20;
   let CURRENT_PAGE = 1;
+
+  // ---- Records table: Excel-style sort + per-column value filters ----
+  // Each column carries a value accessor used for both sorting and the
+  // autofilter checkbox list. `num` columns sort numerically.
+  const TABLE_COLS = {
+    time:     { num: true,  filter: false, label: "cols.timeLocal", get: r => r.timestamp_ms || 0,                 text: r => fmtDateTime(r.timestamp_ms) },
+    host:     { num: false, filter: true,  label: "cols.host",      get: r => r.hostname || "unknown-host",         text: r => r.hostname || "unknown-host" },
+    project:  { num: false, filter: true,  label: "cols.project",   get: r => projectLabel(projectOf(r)),           text: r => projectLabel(projectOf(r)) },
+    model:    { num: false, filter: true,  label: "cols.model",     get: r => r.model || "",                        text: r => r.model || "" },
+    session:  { num: false, filter: true,  label: "cols.session",   get: r => sessionName(r),                       text: r => sessionName(r) },
+    round:    { num: true,  filter: false, label: "cols.round",     get: r => (r.turn_index != null ? r.turn_index : -1), text: r => (r.turn_index != null ? String(r.turn_index) : "") },
+    credits:  { num: true,  filter: false, label: "cols.credits",   get: r => r.credits || 0,                       text: r => fmtNum(r.credits, 2) },
+    duration: { num: true,  filter: false, label: "cols.duration",  get: r => r.duration_ms || 0,                   text: r => fmtDuration(r.duration_ms) },
+  };
+  let SORT_KEY = "time";
+  let SORT_DIR = "desc";
+  const COL_FILTERS = {}; // colKey -> Set of allowed string values (absent = all)
 
   // ---------- helpers ----------
   function fmtNum(n, digits) {
@@ -442,17 +813,65 @@
     if (s == null) return "";
     return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   }
+  function projectLabel(p) {
+    return p === NO_PROJECT ? t("charts.noProject") : p;
+  }
+  function fmtDuration(ms) {
+    if (ms == null || isNaN(ms) || ms <= 0) return "—";
+    const totalSec = Math.round(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  }
+  function shortId(id) {
+    if (!id) return "—";
+    return String(id).slice(0, 8);
+  }
+  function fileUrl(p) {
+    if (!p) return "";
+    let s = String(p).replace(/\\/g, "/");
+    if (!s.startsWith("/")) s = "/" + s; // C:/... -> /C:/...
+    return "file://" + s.split("/").map(encodeURIComponent).join("/");
+  }
+  function sourceCell(r) {
+    const src = escapeHtml(r.source || "");
+    const path = r.file || "";
+    if (!path) return src;
+    const lnTxt = (r.line != null && r.line > 0) ? `<span class="ln">:${r.line}</span>` : "";
+    const copyVal = (r.line != null && r.line > 0) ? `${path}:${r.line}` : path;
+    return `<span class="src-trigger">${src}<span class="info">ⓘ</span></span>
+      <div class="path-pop">
+        <div class="path-text">${escapeHtml(path)}${lnTxt}</div>
+        <div class="pop-actions">
+          <button class="copy-path" data-copy="${escapeHtml(copyVal)}">${escapeHtml(t("source.copy"))}</button>
+          <a href="${escapeHtml(fileUrl(path))}" target="_blank" rel="noopener">${escapeHtml(t("source.open"))}</a>
+        </div>
+      </div>`;
+  }
 
   // ---------- filtering ----------
-  function filteredRecords() {
+  // `skip` lets a visual ignore its own dimension so every category stays
+  // visible while the active selection is highlighted (PowerBI cross-filter).
+  function filteredRecords(skip) {
     const needle = FILTER_TEXT.trim().toLowerCase();
     return RECORDS.filter(r => {
       const host = r.hostname || "";
-      if (!SELECTED_HOSTS.has(host)) return false;
-      if (SELECTED_SOURCE && r.source !== SELECTED_SOURCE) return false;
-      if (SELECTED_MODEL && r.model !== SELECTED_MODEL) return false;
+      if (skip !== "host" && !SELECTED_HOSTS.has(host)) return false;
+      if (skip !== "project" && !SELECTED_PROJECTS.has(projectOf(r))) return false;
+      if (skip !== "source" && SELECTED_SOURCE && r.source !== SELECTED_SOURCE) return false;
+      if (skip !== "model" && SELECTED_MODEL && r.model !== SELECTED_MODEL) return false;
+      const dk = dayKey(r.timestamp_ms);
+      if (skip !== "day") {
+        if (SELECTED_DAY && dk !== SELECTED_DAY) return false;
+        if (DATE_FROM && (!dk || dk < DATE_FROM)) return false;
+        if (DATE_TO && (!dk || dk > DATE_TO)) return false;
+      }
       if (needle) {
-        const hay = [r.model, r.chat_title, host, r.source, r.details].filter(Boolean).join(" ").toLowerCase();
+        const hay = [r.model, r.chat_title, host, r.source, r.details, projectLabel(projectOf(r)), r.session_id]
+          .filter(Boolean).join(" ").toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;
@@ -485,7 +904,7 @@
       const li = document.createElement("li");
       li.innerHTML = `<input type="checkbox" ${SELECTED_HOSTS.has(h) ? "checked" : ""}>
         <span class="swatch" style="background:${HOST_COLOR[h]}"></span>
-        <span class="host">${escapeHtml(h)}</span>
+        <span class="host mask">${escapeHtml(h)}</span>
         <span class="sub">${fmtNum(totals[h] || 0)}</span>`;
       li.querySelector("input").addEventListener("change", e => {
         if (e.target.checked) SELECTED_HOSTS.add(h);
@@ -495,6 +914,126 @@
       });
       ul.appendChild(li);
     }
+  }
+
+  function renderProjectList() {
+    const totals = {};
+    for (const r of RECORDS) {
+      const p = projectOf(r);
+      totals[p] = (totals[p] || 0) + (r.credits || 0);
+    }
+    const ul = document.getElementById("project-list");
+    ul.innerHTML = "";
+
+    const liAll = document.createElement("li");
+    liAll.innerHTML = `<input type="checkbox" ${SELECTED_PROJECTS.size === PROJECTS.length ? "checked" : ""}>
+      <span class="name">${t("aside.all")}</span>`;
+    liAll.querySelector("input").addEventListener("change", e => {
+      if (e.target.checked) PROJECTS.forEach(p => SELECTED_PROJECTS.add(p));
+      else SELECTED_PROJECTS.clear();
+      CURRENT_PAGE = 1;
+      renderAll();
+    });
+    ul.appendChild(liAll);
+
+    for (const p of PROJECTS) {
+      const li = document.createElement("li");
+      li.innerHTML = `<input type="checkbox" ${SELECTED_PROJECTS.has(p) ? "checked" : ""}>
+        <span class="swatch" style="background:${PROJECT_COLOR[p]}"></span>
+        <span class="name ${p === NO_PROJECT ? "" : "mask"}" title="${escapeHtml(projectLabel(p))}">${escapeHtml(projectLabel(p))}</span>
+        <span class="sub">${fmtNum(totals[p] || 0)}</span>`;
+      li.querySelector("input").addEventListener("change", e => {
+        if (e.target.checked) SELECTED_PROJECTS.add(p);
+        else SELECTED_PROJECTS.delete(p);
+        CURRENT_PAGE = 1;
+        renderAll();
+      });
+      ul.appendChild(li);
+    }
+  }
+
+  function syncSidebarChecks() {
+    // Keep sidebar checkboxes in sync after chart-driven (isolate) selections.
+    renderMachineList();
+    renderProjectList();
+  }
+
+  function renderFilterBar() {
+    const bar = document.getElementById("filter-bar");
+    const chips = [];
+    const chip = (kind, label, onClear) => {
+      const id = "fc-" + chips.length;
+      chips.push({ id, kind, label, onClear });
+    };
+    if (SELECTED_HOSTS.size > 0 && SELECTED_HOSTS.size < HOSTS.length) {
+      chip("host", `${t("filter.host")}: ${Array.from(SELECTED_HOSTS).join(", ")}`,
+        () => { HOSTS.forEach(h => SELECTED_HOSTS.add(h)); });
+    }
+    if (SELECTED_PROJECTS.size > 0 && SELECTED_PROJECTS.size < PROJECTS.length) {
+      chip("project", `${t("filter.project")}: ${Array.from(SELECTED_PROJECTS).map(projectLabel).join(", ")}`,
+        () => { PROJECTS.forEach(p => SELECTED_PROJECTS.add(p)); });
+    }
+    if (SELECTED_MODEL) {
+      chip("model", `${t("filter.model")}: ${SELECTED_MODEL}`, () => { SELECTED_MODEL = ""; });
+    }
+    if (SELECTED_SOURCE) {
+      chip("source", `${t("filter.source")}: ${SELECTED_SOURCE}`, () => { SELECTED_SOURCE = ""; });
+    }
+    if (SELECTED_DAY) {
+      chip("day", `${t("filter.day")}: ${SELECTED_DAY}`, () => { SELECTED_DAY = ""; });
+    }
+    if (DATE_FROM) {
+      chip("from", `${t("filter.dateFrom")}: ${DATE_FROM}`, () => { DATE_FROM = ""; });
+    }
+    if (DATE_TO) {
+      chip("to", `${t("filter.dateTo")}: ${DATE_TO}`, () => { DATE_TO = ""; });
+    }
+    if (FILTER_TEXT.trim()) {
+      chip("search", `${t("filter.search")}: ${FILTER_TEXT.trim()}`, () => { FILTER_TEXT = ""; });
+    }
+
+    if (chips.length === 0) { bar.innerHTML = ""; bar.style.display = "none"; return; }
+    bar.style.display = "flex";
+    bar.innerHTML = `<span class="fb-label">${t("filter.active")}</span>` +
+      chips.map(c => {
+        const masked = (c.kind === "host" || c.kind === "project") ? " mask" : "";
+        return `<span class="filter-chip"><span class="lbl${masked}">${escapeHtml(c.label)}</span>` +
+          `<span class="x" data-clear="${c.id}" title="×">×</span></span>`;
+      }).join("") +
+      `<button class="clear-all" id="fb-clear-all">${t("filter.clearAll")}</button>`;
+
+    chips.forEach(c => {
+      const el = bar.querySelector(`[data-clear="${c.id}"]`);
+      if (el) el.addEventListener("click", () => {
+        c.onClear();
+        const fEl = document.getElementById("filter");
+        const fromEl = document.getElementById("date-from");
+        const toEl = document.getElementById("date-to");
+        const mEl = document.getElementById("model-filter");
+        const sEl = document.getElementById("source-filter");
+        if (c.kind === "search" && fEl) fEl.value = "";
+        if (c.kind === "from" && fromEl) fromEl.value = "";
+        if (c.kind === "to" && toEl) toEl.value = "";
+        if (c.kind === "model" && mEl) mEl.value = "";
+        if (c.kind === "source" && sEl) sEl.value = "";
+        CURRENT_PAGE = 1;
+        renderAll();
+      });
+    });
+    const clearAll = document.getElementById("fb-clear-all");
+    if (clearAll) clearAll.addEventListener("click", resetAllFilters);
+  }
+
+  function resetAllFilters() {
+    HOSTS.forEach(h => SELECTED_HOSTS.add(h));
+    PROJECTS.forEach(p => SELECTED_PROJECTS.add(p));
+    SELECTED_MODEL = ""; SELECTED_SOURCE = ""; SELECTED_DAY = "";
+    DATE_FROM = ""; DATE_TO = ""; FILTER_TEXT = "";
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    set("filter", ""); set("date-from", ""); set("date-to", "");
+    set("model-filter", ""); set("source-filter", "");
+    CURRENT_PAGE = 1;
+    renderAll();
   }
 
   function renderSourceFilter() {
@@ -537,10 +1076,22 @@
     }
     const hostCount = new Set(records.map(r => r.hostname || "unknown-host")).size;
 
+    // AI interaction time (sum of per-exchange wall-clock durations).
+    let totalDuration = 0, timedCount = 0;
+    for (const r of records) {
+      if (r.duration_ms != null && r.duration_ms > 0) {
+        totalDuration += r.duration_ms;
+        timedCount += 1;
+      }
+    }
+    const avgExchange = timedCount > 0 ? totalDuration / timedCount : 0;
+
     document.getElementById("kpi-total").textContent = fmtNum(totalCredits, 2);
     document.getElementById("kpi-days").textContent = active;
     document.getElementById("kpi-records").textContent = records.length.toLocaleString();
     document.getElementById("kpi-avg").textContent = fmtNum(avg, 2);
+    document.getElementById("kpi-time").textContent = fmtDuration(totalDuration);
+    document.getElementById("kpi-avg-exchange").textContent = fmtDuration(avgExchange);
 
     document.getElementById("kpi-total-sub").textContent =
       minDay && maxDay ? `${minDay} → ${maxDay}` : t("kpi.noTime");
@@ -550,6 +1101,9 @@
       t("kpi.acrossMachines", { n: hostCount });
     document.getElementById("kpi-avg-sub").textContent =
       peakDay ? t("kpi.peak", { v: fmtNum(peakVal, 2), d: peakDay }) : "";
+    document.getElementById("kpi-time-sub").textContent =
+      t("kpi.timedExchanges", { n: timedCount.toLocaleString() });
+    document.getElementById("kpi-avg-exchange-sub").textContent = t("kpi.perExchangeHint");
 
     document.getElementById("date-range").textContent =
       minDay && maxDay ? `${minDay} → ${maxDay}` : t("kpi.noTime");
@@ -603,15 +1157,22 @@
     const step = innerW / days.length;
     days.forEach((d, idx) => {
       const x = padL + idx * step + (step - barW) / 2;
+      const dim = SELECTED_DAY && SELECTED_DAY !== d ? " dim" : "";
       let cursorY = padT + innerH;
+      let colTotal = 0;
       for (const h of activeHosts) {
         const v = byDay[d][h] || 0;
         if (v <= 0) continue;
+        colTotal += v;
         const h_ = (innerH * (v / (niceMax || 1)));
         cursorY -= h_;
-        svg += `<rect x="${x}" y="${cursorY}" width="${barW}" height="${h_}" fill="${HOST_COLOR[h]}">
+        svg += `<rect class="bar${dim}" x="${x}" y="${cursorY}" width="${barW}" height="${h_}" fill="${HOST_COLOR[h]}">
           <title>${d} · ${escapeHtml(h)} · ${fmtNum(v, 2)}</title></rect>`;
       }
+      // Invisible full-height hit area so the whole day column is clickable.
+      svg += `<rect class="bar hit" data-day="${d}" x="${padL + idx * step}" y="${padT}"
+        width="${step}" height="${innerH}" fill="transparent">
+        <title>${d} · ${fmtNum(colTotal, 2)} · ${t("charts.clickHint")}</title></rect>`;
     });
     // X labels (first, last, ~3 middle)
     const labelIdx = uniqueSorted([0, Math.floor(days.length/4), Math.floor(days.length/2), Math.floor(3*days.length/4), days.length-1]);
@@ -622,9 +1183,17 @@
     }
     svg += `</svg>`;
     container.innerHTML = svg;
+    container.querySelectorAll("rect.hit[data-day]").forEach(rect => {
+      rect.addEventListener("click", () => {
+        const d = rect.getAttribute("data-day");
+        SELECTED_DAY = (SELECTED_DAY === d) ? "" : d;
+        CURRENT_PAGE = 1;
+        renderAll();
+      });
+    });
 
     legend.innerHTML = activeHosts.map(h =>
-      `<span><span class="sw" style="background:${HOST_COLOR[h]};"></span>${escapeHtml(h)}</span>`
+      `<span><span class="sw" style="background:${HOST_COLOR[h]};"></span><span class="mask">${escapeHtml(h)}</span></span>`
     ).join("");
   }
 
@@ -653,9 +1222,9 @@
     }
     const entries = Object.entries(totals).sort((a, b) => b[1] - a[1]);
     const TOP = 4;
-    const top = entries.slice(0, TOP);
+    const top = entries.slice(0, TOP).map(([m, v]) => [m, v, false]);
     const restSum = entries.slice(TOP).reduce((s, e) => s + e[1], 0);
-    if (restSum > 0) top.push([t("charts.others"), restSum]);
+    if (restSum > 0) top.push([t("charts.others"), restSum, true]);
 
     const container = document.getElementById("model-chart");
     const legend = document.getElementById("model-legend");
@@ -669,13 +1238,15 @@
     const CIRC = 2 * Math.PI * R;
     let offset = 0;
     let segs = "";
-    top.forEach(([_, val], i) => {
+    top.forEach(([model, val, isOther], i) => {
       const frac = val / total;
       const len = CIRC * frac;
       const color = PALETTE[i % PALETTE.length];
-      segs += `<circle r="${R}" fill="none" stroke="${color}" stroke-width="${STROKE}"
+      const dim = SELECTED_MODEL && !isOther && SELECTED_MODEL !== model ? " dim" : "";
+      segs += `<circle class="seg${dim}" r="${R}" fill="none" stroke="${color}" stroke-width="${STROKE}"
         stroke-dasharray="${len.toFixed(2)} ${(CIRC-len).toFixed(2)}"
-        stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90)"/>`;
+        stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90)">
+        <title>${escapeHtml(isOther ? t("charts.others") : model)} · ${fmtNum(val, 1)}</title></circle>`;
       offset += len;
     });
     container.innerHTML = `<svg class="chart" viewBox="0 0 220 220" width="100%" height="220">
@@ -687,11 +1258,126 @@
       </g>
     </svg>`;
 
-    legend.innerHTML = top.map(([model, val], i) => {
+    legend.innerHTML = top.map(([model, val, isOther], i) => {
       const color = PALETTE[i % PALETTE.length];
       const pct = total > 0 ? (val / total * 100) : 0;
-      return `<span><span class="sw" style="background:${color};"></span>${escapeHtml(model)} — ${fmtNum(val, 1)} (${pct.toFixed(1)}%)</span>`;
+      const clickable = isOther ? "" : " clickable";
+      const dim = SELECTED_MODEL && !isOther && SELECTED_MODEL !== model ? " dim" : "";
+      const attr = isOther ? "" : ` data-model="${escapeHtml(model)}"`;
+      return `<span class="${clickable}${dim}"${attr}><span class="sw" style="background:${color};"></span>${escapeHtml(model)} — ${fmtNum(val, 1)} (${pct.toFixed(1)}%)</span>`;
     }).join("");
+    legend.querySelectorAll("[data-model]").forEach(el => {
+      el.addEventListener("click", () => {
+        const m = el.getAttribute("data-model");
+        SELECTED_MODEL = (SELECTED_MODEL === m) ? "" : m;
+        const mSel = document.getElementById("model-filter");
+        if (mSel) mSel.value = SELECTED_MODEL;
+        CURRENT_PAGE = 1;
+        renderAll();
+      });
+    });
+  }
+
+  function renderProjectChart(records) {
+    const container = document.getElementById("project-chart");
+    const legend = document.getElementById("project-legend");
+    const totals = {};
+    for (const r of records) {
+      const p = projectOf(r);
+      totals[p] = (totals[p] || 0) + (r.credits || 0);
+    }
+    const entries = Object.entries(totals).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+    if (entries.length === 0) {
+      container.innerHTML = `<div class="empty">${t("empty.data")}</div>`;
+      legend.innerHTML = "";
+      return;
+    }
+    const MAXBARS = 8;
+    const shown = entries.slice(0, MAXBARS);
+    const maxVal = shown[0][1] || 1;
+    const rowH = 26, gap = 8, labelW = 4;
+    const W = 360, barAreaW = 230;
+    const H = shown.length * (rowH + gap) + 6;
+    let svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" width="100%" height="${H}">`;
+    shown.forEach(([p, val], i) => {
+      const y = i * (rowH + gap) + 4;
+      const w = Math.max(2, barAreaW * (val / maxVal));
+      const color = PROJECT_COLOR[p] || PALETTE[i % PALETTE.length];
+      const dim = SELECTED_PROJECTS.size < PROJECTS.length && !SELECTED_PROJECTS.has(p) ? " dim" : "";
+      const isMasked = p === NO_PROJECT ? "" : "mask";
+      const label = projectLabel(p);
+      const truncated = label.length > 18 ? label.slice(0, 17) + "…" : label;
+      svg += `<g class="bar${dim}" data-project="${encodeURIComponent(p)}">
+        <rect class="bar${dim}" x="${labelW}" y="${y}" width="${w}" height="${rowH}" rx="3" fill="${color}">
+          <title>${escapeHtml(label)} · ${fmtNum(val, 1)} · ${t("charts.clickHint")}</title></rect>
+        <text class="${isMasked}" x="${labelW + 8}" y="${y + rowH / 2 + 4}" fill="#0d1117" font-size="11" font-weight="600" font-family="inherit">${escapeHtml(truncated)}</text>
+        <text x="${labelW + w + 8}" y="${y + rowH / 2 + 4}" fill="var(--text-dim)" font-size="11" font-family="inherit">${fmtNum(val, 1)}</text>
+      </g>`;
+    });
+    svg += `</svg>`;
+    container.innerHTML = svg;
+    container.querySelectorAll("g.bar[data-project]").forEach(g => {
+      g.style.cursor = "pointer";
+      g.addEventListener("click", () => {
+        const p = decodeURIComponent(g.getAttribute("data-project"));
+        const isolated = SELECTED_PROJECTS.size === 1 && SELECTED_PROJECTS.has(p);
+        SELECTED_PROJECTS.clear();
+        if (isolated) PROJECTS.forEach(x => SELECTED_PROJECTS.add(x));
+        else SELECTED_PROJECTS.add(p);
+        CURRENT_PAGE = 1;
+        renderAll();
+      });
+    });
+    const hidden = entries.length - shown.length;
+    legend.innerHTML = hidden > 0 ? `<span>+${hidden} ${t("charts.others")}</span>` : "";
+  }
+
+  function renderTopSessions(records) {
+    const container = document.getElementById("top-sessions");
+    const sessions = {}; // session_id -> { credits, turns, duration, project, total }
+    for (const r of records) {
+      const sid = r.session_id || "(none)";
+      if (!sessions[sid]) sessions[sid] = { credits: 0, turns: 0, duration: 0, project: projectOf(r), total: r.session_total || 0 };
+      const s = sessions[sid];
+      s.credits += (r.credits || 0);
+      s.turns += 1;
+      if (r.duration_ms != null && r.duration_ms > 0) s.duration += r.duration_ms;
+      if (r.session_total) s.total = Math.max(s.total, r.session_total);
+    }
+    const rows = Object.entries(sessions)
+      .filter(([sid]) => sid !== "(none)")
+      .sort((a, b) => b[1].credits - a[1].credits)
+      .slice(0, 8);
+    if (rows.length === 0) {
+      container.innerHTML = `<div class="empty">${t("empty.data")}</div>`;
+      return;
+    }
+    container.innerHTML = `<table>
+      <thead><tr>
+        <th data-i18n="sessions.colSession">${t("sessions.colSession")}</th>
+        <th data-i18n="sessions.colProject">${t("sessions.colProject")}</th>
+        <th class="num">${t("sessions.colTurns")}</th>
+        <th class="num">${t("sessions.colTime")}</th>
+        <th class="num">${t("sessions.colCredits")}</th>
+      </tr></thead>
+      <tbody>${rows.map(([sid, s]) => `<tr style="cursor:pointer" data-session="${escapeHtml(sid)}">
+        <td><span class="session-name mask" title="${escapeHtml(sid)}">${escapeHtml(sessionNameById(sid))}</span></td>
+        <td><span class="${s.project === NO_PROJECT ? "" : "mask"}">${escapeHtml(projectLabel(s.project))}</span></td>
+        <td class="num">${s.total ? `${s.turns}/${s.total}` : s.turns}</td>
+        <td class="num dur">${fmtDuration(s.duration)}</td>
+        <td class="num">${fmtNum(s.credits, 1)}</td>
+      </tr>`).join("")}</tbody>
+    </table>`;
+    container.querySelectorAll("tr[data-session]").forEach(tr => {
+      tr.addEventListener("click", () => {
+        const sid = tr.getAttribute("data-session");
+        FILTER_TEXT = sid;
+        const fEl = document.getElementById("filter");
+        if (fEl) fEl.value = sid;
+        CURRENT_PAGE = 1;
+        renderAll();
+      });
+    });
   }
 
   function renderByMachine(records) {
@@ -718,7 +1404,7 @@
       const topModel = Object.entries(s.models).sort((a, b) => b[1] - a[1])[0];
       const share = totalCredits > 0 ? (s.credits / totalCredits * 100) : 0;
       return `<tr>
-        <td><span class="chip host">${escapeHtml(host)}</span></td>
+        <td><span class="chip host mask">${escapeHtml(host)}</span></td>
         <td class="num">${s.records}</td>
         <td class="num">${s.days.size}</td>
         <td>${topModel ? `<span class="chip model">${escapeHtml(topModel[0])}</span>` : "—"}</td>
@@ -731,31 +1417,213 @@
   function renderRecordsTable(records) {
     const body = document.getElementById("records-body");
     const count = document.getElementById("records-count");
-    count.textContent = t("toolbar.showing", { shown: records.length.toLocaleString(), total: RECORDS.length.toLocaleString() });
 
     if (records.length === 0) {
-      body.innerHTML = `<tr><td colspan="6" class="empty">${t("empty.records")}</td></tr>`;
+      count.textContent = t("toolbar.showing", { shown: "0", total: RECORDS.length.toLocaleString() });
+      body.innerHTML = `<tr><td colspan="9" class="empty">${t("empty.records")}</td></tr>`;
       renderPagination(0);
       return;
     }
-    const sorted = records.slice().sort((a, b) => (b.timestamp_ms || 0) - (a.timestamp_ms || 0));
-    const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+    const view = recordsForTable(records);
+    count.textContent = t("toolbar.showing", { shown: view.length.toLocaleString(), total: RECORDS.length.toLocaleString() });
+    const totalPages = Math.max(1, Math.ceil(view.length / PAGE_SIZE));
     if (CURRENT_PAGE > totalPages) CURRENT_PAGE = totalPages;
     if (CURRENT_PAGE < 1) CURRENT_PAGE = 1;
     const start = (CURRENT_PAGE - 1) * PAGE_SIZE;
-    const slice = sorted.slice(start, start + PAGE_SIZE);
+    const slice = view.slice(start, start + PAGE_SIZE);
 
-    body.innerHTML = slice.map(r => `
+    if (slice.length === 0) {
+      body.innerHTML = `<tr><td colspan="9" class="empty">${t("empty.records")}</td></tr>`;
+      renderPagination(0);
+      return;
+    }
+
+    body.innerHTML = slice.map(r => {
+      const p = projectOf(r);
+      const projCell = p === NO_PROJECT
+        ? `<span style="color:var(--text-dim)">${escapeHtml(t("charts.noProject"))}</span>`
+        : `<span class="chip mask" title="${escapeHtml(p)}">${escapeHtml(p)}</span>`;
+      let sessionCell = "—";
+      let roundCell = "—";
+      if (r.session_id) {
+        sessionCell = `<span class="session-name mask" title="${escapeHtml(r.session_id)}">${escapeHtml(sessionName(r))}</span>`;
+        if (r.turn_index != null) {
+          const roundTxt = (r.session_total != null)
+            ? t("session.round", { i: r.turn_index, n: r.session_total })
+            : t("session.roundOnly", { i: r.turn_index });
+          roundCell = `<span class="round-badge">${escapeHtml(roundTxt)}</span>`;
+        }
+      }
+      return `
       <tr>
         <td>${escapeHtml(fmtDateTime(r.timestamp_ms))}</td>
-        <td><span class="chip host">${escapeHtml(r.hostname || "unknown-host")}</span></td>
+        <td><span class="chip host mask">${escapeHtml(r.hostname || "unknown-host")}</span></td>
+        <td>${projCell}</td>
         <td><span class="chip model">${escapeHtml(r.model || "")}</span></td>
-        <td>${escapeHtml(r.chat_title || "")}</td>
+        <td>${sessionCell}</td>
+        <td>${roundCell}</td>
         <td class="num">${fmtNum(r.credits, 2)}</td>
-        <td>${escapeHtml(r.source || "")}</td>
-      </tr>
-    `).join("");
+        <td class="num dur">${fmtDuration(r.duration_ms)}</td>
+        <td class="src-cell">${sourceCell(r)}</td>
+      </tr>`;
+    }).join("");
     renderPagination(totalPages);
+  }
+
+  // Apply per-column value filters, then the active sort.
+  function recordsForTable(records) {
+    let view = records;
+    for (const [key, allowed] of Object.entries(COL_FILTERS)) {
+      const col = TABLE_COLS[key];
+      if (!col || !allowed) continue;
+      view = view.filter(r => allowed.has(String(col.get(r))));
+    }
+    const col = TABLE_COLS[SORT_KEY] || TABLE_COLS.time;
+    const dir = SORT_DIR === "asc" ? 1 : -1;
+    view = view.slice().sort((a, b) => {
+      const va = col.get(a), vb = col.get(b);
+      let cmp;
+      if (col.num) cmp = (va || 0) - (vb || 0);
+      else cmp = String(va).localeCompare(String(vb), undefined, { numeric: true });
+      if (cmp === 0) cmp = (a.timestamp_ms || 0) - (b.timestamp_ms || 0);
+      return cmp * dir;
+    });
+    return view;
+  }
+
+  // Build interactive headers (sort toggles + autofilter funnels).
+  function renderRecordsHead() {
+    document.querySelectorAll("#records-head th[data-col]").forEach(th => {
+      const key = th.getAttribute("data-col");
+      const col = TABLE_COLS[key];
+      if (!col) return;
+      const sorted = SORT_KEY === key;
+      const arrow = sorted ? (SORT_DIR === "asc" ? "▲" : "▼") : "▾";
+      const funnelActive = COL_FILTERS[key] ? "active" : "";
+      const funnel = col.filter
+        ? `<button class="th-funnel ${funnelActive}" data-col="${key}" title="${escapeHtml(t("colfilter.title"))}" aria-label="filter">⏷</button>`
+        : "";
+      th.innerHTML = `<span class="th-inner">
+          <span class="th-sort ${sorted ? "sorted" : ""}" data-col="${key}" title="${escapeHtml(t("colfilter.sortHint"))}">
+            ${escapeHtml(t(col.label))}<span class="arrow">${arrow}</span>
+          </span>${funnel}
+        </span>`;
+    });
+    // wire sort
+    document.querySelectorAll("#records-head .th-sort").forEach(el => {
+      el.addEventListener("click", () => {
+        const key = el.getAttribute("data-col");
+        if (SORT_KEY === key) SORT_DIR = (SORT_DIR === "asc") ? "desc" : "asc";
+        else { SORT_KEY = key; SORT_DIR = TABLE_COLS[key].num ? "desc" : "asc"; }
+        CURRENT_PAGE = 1;
+        renderRecordsHead();
+        renderRecordsTable(filteredRecords());
+      });
+    });
+    // wire funnels
+    document.querySelectorAll("#records-head .th-funnel").forEach(el => {
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openColumnFilter(el.getAttribute("data-col"), el);
+      });
+    });
+  }
+
+  // ---- column autofilter dropdown ----
+  let COL_FILTER_EL = null;
+  function ensureColFilterEl() {
+    if (COL_FILTER_EL) return COL_FILTER_EL;
+    const el = document.createElement("div");
+    el.className = "col-filter";
+    document.body.appendChild(el);
+    COL_FILTER_EL = el;
+    document.addEventListener("click", (e) => {
+      if (!el.classList.contains("open")) return;
+      if (el.contains(e.target)) return;
+      if (e.target.closest(".th-funnel")) return;
+      el.classList.remove("open");
+    });
+    return el;
+  }
+  function openColumnFilter(key, anchor) {
+    const col = TABLE_COLS[key];
+    if (!col) return;
+    const el = ensureColFilterEl();
+    if (el.classList.contains("open") && el.getAttribute("data-col") === key) {
+      el.classList.remove("open");
+      return;
+    }
+    el.setAttribute("data-col", key);
+    // distinct values from the globally filtered set (ignoring this column's own filter)
+    const base = filteredRecords();
+    const counts = new Map();
+    for (const r of base) {
+      const v = String(col.get(r));
+      counts.set(v, (counts.get(v) || 0) + 1);
+    }
+    const values = Array.from(counts.keys()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const allowed = COL_FILTERS[key]; // Set or undefined
+    const isChecked = (v) => !allowed || allowed.has(v);
+
+    const renderList = (needle) => {
+      const nd = (needle || "").trim().toLowerCase();
+      const items = values.filter(v => !nd || v.toLowerCase().includes(nd));
+      el.querySelector(".cf-list").innerHTML = items.map(v => `
+        <li><label>
+          <input type="checkbox" class="cf-cb" value="${escapeHtml(v)}" ${isChecked(v) ? "checked" : ""}>
+          <span class="cf-name" title="${escapeHtml(v)}">${escapeHtml(v || t("charts.noProject"))}</span>
+          <span class="cf-count">${counts.get(v)}</span>
+        </label></li>`).join("") || `<li style="padding:6px;color:var(--text-dim);font-size:12px;">—</li>`;
+      el.querySelectorAll(".cf-cb").forEach(cb => cb.addEventListener("change", commit));
+    };
+    const commit = () => {
+      const checked = new Set(Array.from(el.querySelectorAll(".cf-cb")).filter(cb => cb.checked).map(cb => cb.value));
+      // account for values hidden by the search box: keep their current state
+      const searchVal = el.querySelector(".cf-search").value.trim().toLowerCase();
+      for (const v of values) {
+        if (searchVal && !v.toLowerCase().includes(searchVal)) {
+          if (isChecked(v)) checked.add(v);
+        }
+      }
+      if (checked.size >= values.length) delete COL_FILTERS[key];
+      else COL_FILTERS[key] = checked;
+      CURRENT_PAGE = 1;
+      renderRecordsHead();
+      renderRecordsTable(filteredRecords());
+      // keep dropdown anchored to (re-rendered) funnel
+      const newAnchor = document.querySelector(`#records-head .th-funnel[data-col="${key}"]`);
+      if (newAnchor) positionColFilter(el, newAnchor);
+    };
+
+    el.innerHTML = `
+      <input type="search" class="cf-search" placeholder="${escapeHtml(t("colfilter.search"))}">
+      <div class="cf-actions">
+        <button data-act="all">${escapeHtml(t("colfilter.selectAll"))}</button>
+        <button data-act="clear">${escapeHtml(t("colfilter.clear"))}</button>
+      </div>
+      <ul class="cf-list"></ul>`;
+    el.querySelector(".cf-search").addEventListener("input", (e) => renderList(e.target.value));
+    el.querySelector('[data-act="all"]').addEventListener("click", () => {
+      delete COL_FILTERS[key];
+      el.querySelectorAll(".cf-cb").forEach(cb => cb.checked = true);
+      CURRENT_PAGE = 1; renderRecordsHead(); renderRecordsTable(filteredRecords());
+    });
+    el.querySelector('[data-act="clear"]').addEventListener("click", () => {
+      COL_FILTERS[key] = new Set();
+      el.querySelectorAll(".cf-cb").forEach(cb => cb.checked = false);
+      CURRENT_PAGE = 1; renderRecordsHead(); renderRecordsTable(filteredRecords());
+    });
+    renderList("");
+    el.classList.add("open");
+    positionColFilter(el, anchor);
+  }
+  function positionColFilter(el, anchor) {
+    const r = anchor.getBoundingClientRect();
+    const w = 260;
+    let left = r.left;
+    if (left + w > window.innerWidth - 8) left = window.innerWidth - w - 8;
+    el.style.left = Math.max(8, left) + "px";
+    el.style.top = (r.bottom + 4) + "px";
   }
 
   function renderPagination(totalPages) {
@@ -793,10 +1661,15 @@
   // ---------- main render ----------
   function renderAll() {
     const recs = filteredRecords();
+    renderFilterBar();
+    syncSidebarChecks();
     renderKpis(recs);
-    renderDailyChart(recs);
-    renderModelChart(recs);
+    renderDailyChart(filteredRecords("day"));
+    renderModelChart(filteredRecords("model"));
+    renderProjectChart(filteredRecords("project"));
+    renderTopSessions(recs);
     renderByMachine(recs);
+    renderRecordsHead();
     renderRecordsTable(recs);
   }
 
@@ -806,6 +1679,7 @@
     applyStaticI18n();
     renderSummaryLine();
     renderMachineList();
+    renderProjectList();
     renderAll();
   }
 
@@ -816,7 +1690,7 @@
   document.getElementById("filter").addEventListener("input", e => {
     FILTER_TEXT = e.target.value || "";
     CURRENT_PAGE = 1;
-    renderRecordsTable(filteredRecords());
+    renderAll();
   });
   document.getElementById("source-filter").addEventListener("change", e => {
     SELECTED_SOURCE = e.target.value || "";
@@ -828,6 +1702,18 @@
     CURRENT_PAGE = 1;
     renderAll();
   });
+  document.getElementById("date-from").addEventListener("change", e => {
+    DATE_FROM = e.target.value || "";
+    SELECTED_DAY = "";
+    CURRENT_PAGE = 1;
+    renderAll();
+  });
+  document.getElementById("date-to").addEventListener("change", e => {
+    DATE_TO = e.target.value || "";
+    SELECTED_DAY = "";
+    CURRENT_PAGE = 1;
+    renderAll();
+  });
   document.getElementById("page-size").addEventListener("change", e => {
     const n = parseInt(e.target.value, 10);
     PAGE_SIZE = isNaN(n) ? 20 : n;
@@ -835,9 +1721,129 @@
     renderRecordsTable(filteredRecords());
   });
 
+  // privacy mask toggle
+  function applyPrivacy() {
+    document.body.classList.toggle("privacy-on", PRIVACY_ON);
+    const btn = document.getElementById("privacy-toggle");
+    btn.classList.toggle("toggled", PRIVACY_ON);
+    document.getElementById("privacy-icon-off").style.display = PRIVACY_ON ? "none" : "";
+    document.getElementById("privacy-icon-on").style.display = PRIVACY_ON ? "" : "none";
+  }
+  document.getElementById("privacy-toggle").addEventListener("click", () => {
+    PRIVACY_ON = !PRIVACY_ON;
+    try { localStorage.setItem("gh-usage.privacy", PRIVACY_ON ? "1" : "0"); } catch (_) {}
+    applyPrivacy();
+  });
+
+  // full-page screenshot (privacy mask is always forced on for the capture)
+  function screenshotFileName() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, "0");
+    return `gh-usage-report-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.jpg`;
+  }
+  async function saveScreenshotBlob(blob, suggestedName) {
+    if (window.showSaveFilePicker) {
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName,
+          types: [{ description: "JPEG image", accept: { "image/jpeg": [".jpg", ".jpeg"] } }]
+        });
+        const w = await handle.createWritable();
+        await w.write(blob);
+        await w.close();
+        return;
+      } catch (e) {
+        if (e && e.name === "AbortError") return; // user cancelled the picker
+        // otherwise fall back to a normal download
+      }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = suggestedName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  async function captureScreenshot() {
+    const btn = document.getElementById("screenshot-btn");
+    if (btn.dataset.busy) return;
+    if (!window.snapdom || typeof window.snapdom.toBlob !== "function") { alert(t("shot.error")); return; }
+    btn.dataset.busy = "1";
+    btn.disabled = true;
+    document.getElementById("screenshot-icon").style.display = "none";
+    document.getElementById("screenshot-spinner").style.display = "";
+    btn.classList.add("spinning");
+
+    // close any open column-filter dropdown so it is not captured
+    if (typeof COL_FILTER_EL !== "undefined" && COL_FILTER_EL) { COL_FILTER_EL.classList.remove("open"); }
+    const wasPrivacy = PRIVACY_ON;
+    if (!wasPrivacy) { PRIVACY_ON = true; applyPrivacy(); }
+    // let the privacy mask paint before capturing
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    try {
+      // snapdom renders through the browser's own engine (SVG <foreignObject>), so
+      // CSS `filter: blur()` on the privacy mask is honoured natively. Export as a
+      // compressed JPEG at 1x to keep the file small enough for easy sharing — the
+      // report is meant to be readable, not pixel-perfect.
+      const bg = getComputedStyle(document.body).backgroundColor || "#0d1117";
+      const blob = await window.snapdom.toBlob(document.documentElement, {
+        backgroundColor: bg,
+        scale: 1,
+        type: "jpeg",
+        quality: 0.7
+      });
+      if (!blob) throw new Error("snapdom returned null blob");
+      await saveScreenshotBlob(blob, screenshotFileName());
+    } catch (e) {
+      console.error("screenshot failed", e);
+      alert(t("shot.error"));
+    } finally {
+      if (!wasPrivacy) { PRIVACY_ON = false; applyPrivacy(); }
+      btn.classList.remove("spinning");
+      document.getElementById("screenshot-spinner").style.display = "none";
+      document.getElementById("screenshot-icon").style.display = "";
+      btn.disabled = false;
+      delete btn.dataset.busy;
+    }
+  }
+  document.getElementById("screenshot-btn").addEventListener("click", captureScreenshot);
+
+  // copy source path from the hover popover (delegated, survives re-renders)
+  document.getElementById("records-body").addEventListener("click", e => {
+    const btn = e.target.closest(".copy-path");
+    if (!btn) return;
+    const val = btn.getAttribute("data-copy") || "";
+    const done = () => {
+      const old = btn.textContent;
+      btn.textContent = t("source.copied");
+      btn.classList.add("copied");
+      setTimeout(() => { btn.textContent = old; btn.classList.remove("copied"); }, 1200);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(val).then(done).catch(() => fallbackCopy(val, done));
+    } else {
+      fallbackCopy(val, done);
+    }
+  });
+  function fallbackCopy(text, done) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); done(); } catch (_) {}
+    document.body.removeChild(ta);
+  }
+
   // boot
   document.getElementById("generated-at").textContent = RAW && RAW.generatedAt ? RAW.generatedAt : "—";
   renderSourceFilter();
+  try { PRIVACY_ON = localStorage.getItem("gh-usage.privacy") === "1"; } catch (_) {}
+  applyPrivacy();
 
   let initialLang = "en";
   try { initialLang = localStorage.getItem("gh-usage.lang") || "en"; } catch (_) {}

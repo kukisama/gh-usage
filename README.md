@@ -1,127 +1,138 @@
-# gh-usage
+# gh-usage · See your Copilot usage at a glance
 
 English | [简体中文](README.zh-CN.md)
 
-Fast local GitHub Copilot usage reports from VS Code and Copilot CLI records.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange.svg?logo=rust)](https://www.rust-lang.org/)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](#-getting-started)
+[![Releases](https://img.shields.io/badge/Releases-download-brightgreen.svg)](https://github.com/kukisama/gh-usage/releases)
 
-`gh-usage` helps individuals and teams understand local GitHub Copilot credit usage without waiting for a central report. It scans usage records already stored on the machine, summarizes the results, and writes both spreadsheet-friendly CSV data and a self-contained HTML report.
+> One command turns your scattered local GitHub Copilot usage records into a clean, visual report.
+> Nothing is uploaded, nothing phones home — your data stays on your machine.
 
-It is designed for local analysis, internal review, and operational visibility. It is not a replacement for GitHub billing or official usage reports.
+![gh-usage report overview](design/01.jpg)
 
-## What it helps answer
+---
 
-- How many Copilot credits were found on this machine?
-- Which days had the highest usage?
-- Which models and sources contributed to the usage?
-- Which chats or sessions created the detailed records?
-- How does usage compare across multiple machines?
-- Can the results be shared as a simple report without setting up a server?
+## 🙋 Who it's for
 
-## Highlights
+- **Heavy Copilot users** who want to see how many credits they spent this month, which days were busiest, and which model they rely on most.
+- **Team leads and engineering managers** who need a quick read on usage across people and projects for reviews and planning.
+- **Anyone who reports on their work** and wants a report they can screenshot and share, instead of raw logs.
 
-- **Local-first:** scans files already available on the current machine.
-- **Fast:** implemented in Rust and suitable for large VS Code history folders.
-- **Business-readable output:** prints a compact terminal summary and writes an HTML report for review.
-- **Spreadsheet-ready details:** exports CSV by default, with optional JSON for automation.
-- **Multi-machine aggregation:** combines CSV files from multiple computers into one merged report.
-- **Cross-platform:** supports Windows, Linux, and macOS VS Code data locations.
+---
 
-## Install
+## ✨ Highlights
 
-### Windows
+### ⚡ Fast
 
-Install from Windows Package Manager:
+Written in Rust, it scans local history directories quickly with a light footprint. In one local run, it processed **877 files** and extracted **1,020 records** in **1.52 seconds**.
+
+```text
++- GitHub Copilot Usage ---------------------------------+
+| records               1020  scanned files          877 |
+| total credits     157204.3  candidate lines        102 |
+| active days             21  parse errors             0 |
+| avg / day           7485.9  total time          1.52 s |
++--------------------------------------------------------+
+```
+
+### 🔒 Local and private
+
+- **Runs entirely on your machine.** It only reads files that already exist locally — nothing is uploaded.
+- **One-click privacy mask.** A built-in toggle blurs hostnames, project names, and session titles, so screenshots are safe to share.
+- **You own the data.** Every result is written to a local file you choose — keep it or delete it, your call.
+
+### 🖥️ A report that's easy to use
+
+The report is a **single self-contained HTML file** — double-click to open it in any browser. No database, no server, no internet required. Clean dark theme, tidy layout, and built-in English/Chinese switching.
+
+---
+
+## 📊 What's in the report
+
+### Key metrics at a glance
+
+Total credits, active days, record count, daily average, total AI interaction time, and average time per exchange — the numbers you care about, right at the top.
+
+![Key metric cards](design/dashboard-kpi.jpg)
+
+### Trends and model breakdown
+
+A daily bar chart shows which days were busiest, and a donut chart breaks down each model's share at a glance.
+
+![Daily trend and model split](design/dashboard-charts.jpg)
+
+### Drill down by project and session
+
+A per-project bar chart lets you click to filter, and a "top sessions by credits" list shows exactly where your usage went.
+
+![By project and top sessions](design/dashboard-project.jpg)
+
+### A searchable, filterable records table
+
+The records table supports keyword search, filtering by model and source, click-to-sort columns, and pagination. The screenshot below has privacy mode on — sensitive fields are masked automatically.
+
+![Records table with privacy mask on](design/dashboard-records.jpg)
+
+### Sidebar filters
+
+Filter by machine, project, or date range from the left, and the report updates live — no setup required.
+
+![Sidebar filters](design/dashboard-sidebar.jpg)
+
+### One-click screenshot
+
+The camera button in the top-right saves the **entire page** as a single image (a crisp JPEG, around 430 KB). Privacy masking turns on automatically while capturing, so it's safe to share.
+
+---
+
+## 🚀 Getting started
+
+### 1. Install
+
+**Windows** (via the Windows Package Manager):
 
 ```powershell
 winget install gh-usage
 ```
 
-Upgrade later:
+Upgrade:
 
 ```powershell
 winget upgrade gh-usage
 ```
 
-### Linux and macOS
+**Linux / macOS:** download the archive for your platform from the [Releases page](https://github.com/kukisama/gh-usage/releases), unpack it, and run `gh-usage`.
 
-Download the matching archive from the [Releases page](https://github.com/kukisama/gh-usage/releases), extract it, and run the `gh-usage` binary.
+### 2. Run
 
-## Quick start
-
-Run a local scan:
+Run it from your terminal:
 
 ```powershell
 gh-usage
 ```
 
-By default, the command writes two files in the current directory:
+It writes two files to the current directory:
 
-- `copilot-usage-<machine>.csv`: detailed records for spreadsheet analysis
-- `copilot-usage-<machine>.html`: an interactive report for review and sharing
+- `copilot-usage-<machine>.csv` — import into Excel for deeper analysis
+- `copilot-usage-<machine>.html` — the report you open with a double-click
 
-The terminal also prints a compact summary:
+### 3. Open the report
 
-```text
-+- GitHub Copilot Usage ---------------------------------+
-| records                489  scanned files           82 |
-| total credits      60122.2  candidate lines         49 |
-| active days             14  parse errors             0 |
-| avg / day           4294.4  total time          1.05 s |
-+- Daily credits ----------------------------------------+
-| 2026-06-02     74 records     10053.30 credits         |
-| 2026-06-03     30 records      2942.00 credits         |
-| 2026-06-04     42 records      2159.50 credits         |
-+- Files ------------------------------------------------+
-| csv   .\copilot-usage-workstation.csv                  |
-| html  .\copilot-usage-workstation.html                 |
-+--------------------------------------------------------+
-```
+Double-click the HTML file. Search, filter, switch language, toggle privacy, and save a screenshot — all from the page.
 
-The numbers above are examples. Your report depends on the local records available on your machine.
+---
 
-The generated HTML report looks like this:
+## 🛠️ Common commands
 
-![gh-usage HTML report (English)](design/image1.png)
-
-## HTML report
-
-The HTML report is self-contained and can be opened in any browser. It includes:
-
-- total records, total credits, active days, and average credits per active day
-- daily usage chart
-- model and source breakdowns
-- per-machine summary when merged data is available
-- searchable and filterable record table
-- pagination for large reports
-- language toggle for the report UI
-
-No server, database, or internet connection is required to view the generated report.
-
-## CSV details
-
-The CSV contains one row per extracted usage record. Commonly used columns include:
-
-- `hostname`: machine that produced the record
-- `local_time_hint`: local timestamp when available
-- `chat_title`: chat title when available
-- `source`: record source, such as VS Code chat history or Copilot CLI logs
-- `model`: model name parsed from the record
-- `credits`: credits consumed by the record
-- `details`: raw credit detail text
-- `file`: local source file scanned
-- `line`: source line number
-
-CSV files include a UTF-8 BOM by default for better Windows Excel compatibility. Use `--no-bom` to disable it.
-
-## Common usage scenarios
-
-Include GitHub Copilot CLI logs:
+Include GitHub Copilot CLI records:
 
 ```powershell
 gh-usage --include-cli-logs
 ```
 
-Scan only recent records:
+Scan only the last week:
 
 ```powershell
 gh-usage --since-days 7
@@ -133,47 +144,41 @@ Write to a specific location:
 gh-usage --output .\reports\copilot-usage.csv --html .\reports\copilot-usage.html
 ```
 
-Export JSON instead of CSV:
+Export JSON for automation, skip the HTML:
 
 ```powershell
 gh-usage --format json --output .\reports\copilot-usage.json --no-html
 ```
 
-Skip the HTML report:
+### Merge reports from multiple machines
 
-```powershell
-gh-usage --no-html
-```
-
-## Merge reports from multiple machines
-
-When several machines are involved, run `gh-usage` on each one and collect the generated `copilot-usage-<machine>.csv` files into a single folder.
-
-Then run:
+Run `gh-usage` on each machine, collect the `copilot-usage-*.csv` files into one folder, then:
 
 ```powershell
 gh-usage --merge .\shared\copilot-usage
 ```
 
-Merge mode:
+It reads every CSV, deduplicates records, and produces one combined report with a per-machine breakdown — handy for swapping machines, team reviews, or comparing your desktop against your laptop.
 
-- reads every `copilot-usage-*.csv` file in the target folder
-- skips local scanning entirely
-- deduplicates repeated records
-- writes `copilot-usage-merged.html` next to the CSV files
-- keeps machine-level filtering and summaries in the report
+---
 
-This is useful for team reviews, device migrations, or comparing usage across a workstation and a laptop.
+## 📄 CSV fields
 
-## Data scope and limitations
+Each row is one usage record. Common fields include machine name, local time, session title, source, model, credits spent, the raw credit details, and the source file and line number. The CSV includes a UTF-8 BOM by default so Windows Excel opens it cleanly (use `--no-bom` to turn it off).
 
-- `gh-usage` scans local files only.
-- It uses the standard VS Code user-data location for the current OS unless a custom path is provided.
-- Deleted or unavailable local history cannot be reconstructed.
-- Records without credit details are ignored.
-- Results are intended for analysis and rough comparison, not official accounting.
+---
 
-## Useful options
+## ⚠️ Good to know
+
+`gh-usage` is built for **local analysis and review** — great for spotting trends and rough comparisons, but **not a replacement for GitHub's official billing or usage reports**.
+
+- It only reads files that exist locally; deleted history can't be recovered.
+- Records without credit details are skipped.
+- It uses your system's standard VS Code data directory by default, and supports custom paths.
+
+---
+
+## 📚 Options
 
 ```text
 --include-cli-logs       Include GitHub Copilot CLI records
@@ -182,8 +187,22 @@ This is useful for team reviews, device migrations, or comparing usage across a 
 --html <PATH>            Write the HTML report to a specific path
 --no-html                Do not generate the HTML report
 --merge [DIR]            Merge existing copilot-usage-*.csv files into one report
---format csv|json        Choose output format
+--format csv|json        Choose the output format
 --hostname <NAME>        Override the machine name stored in records
 ```
 
 Run `gh-usage --help` for the full command reference.
+
+---
+
+## 📜 License
+
+Released under the [MIT License](LICENSE) — free to use, modify, and distribute.
+
+## 🤝 Contributing
+
+Issues and pull requests are welcome. If this tool helps you out, a ⭐ Star is always appreciated.
+
+---
+
+<sub>Generated locally by gh-usage · your data stays on your machine.</sub>

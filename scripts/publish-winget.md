@@ -110,16 +110,16 @@ For a normal update after the GitHub Release has completed, the core flow is:
 2. Generate and validate the winget manifest.
 3. Submit the validated manifest to `microsoft/winget-pkgs`.
 
-For example, after release `v1.1.0` is available:
+For example, after release `v1.2.0` is available:
 
 ```powershell
-.\scripts\publish-winget.ps1 -Version 1.1.0 -Validate
+.\scripts\publish-winget.ps1 -Version 1.2.0 -Validate
 ```
 
 Then submit:
 
 ```powershell
-.\scripts\publish-winget.ps1 -Version 1.1.0 -Submit
+.\scripts\publish-winget.ps1 -Version 1.2.0 -Submit
 ```
 
 The GitHub Release step happens before this script. This script only prepares, validates, and submits the winget package metadata for an already released version.

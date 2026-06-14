@@ -1,6 +1,6 @@
 [package]
 name = "gh-usage"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2024"
 license = "MIT"
 authors = ["gh-usage contributors"]
@@ -29,3 +29,10 @@ windows-sys = { version = "0.61", features = [
 	"Win32_System_Console",
 	"Win32_System_Diagnostics_ToolHelp",
 ] }
+
+[profile.release]
+opt-level = "z"     # optimize aggressively for size
+lto = true          # link-time optimization across all crates
+codegen-units = 1   # better cross-module optimization (smaller, slower build)
+panic = "abort"     # drop unwinding tables/landing pads
+strip = true        # strip symbols/debug info from the binary

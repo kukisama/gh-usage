@@ -89,6 +89,7 @@ struct ContextFields {
     model_id: Option<String>,
     agent_id: Option<String>,
     timestamp_ms: Option<i64>,
+    total_elapsed_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,6 +120,18 @@ struct UsageRecord {
     response_id: Option<String>,
     #[serde(default)]
     agent_id: Option<String>,
+    /// Workspace folder name this session belongs to (derived from workspace.json).
+    #[serde(default)]
+    project: Option<String>,
+    /// Wall-clock duration of this single exchange in milliseconds (timings.totalElapsed).
+    #[serde(default)]
+    duration_ms: Option<i64>,
+    /// 1-based position of this exchange within its parent session.
+    #[serde(default)]
+    turn_index: Option<u32>,
+    /// Total number of exchanges recorded for the parent session.
+    #[serde(default)]
+    session_total: Option<u32>,
     #[serde(default)]
     file: String,
     #[serde(default)]
@@ -217,8 +230,12 @@ fn main() -> Result<()> {
     let discover_ms = discover_started.elapsed().as_millis();
 
     let scanned_files = files.len();
+    let project_map = build_project_map(&files);
     let scan_started = Instant::now();
-    let file_results: Vec<FileScanResult> = files.par_iter().map(|path| scan_file(path)).collect();
+    let file_results: Vec<FileScanResult> = files
+        .par_iter()
+        .map(|path| scan_file(path, &project_map))
+        .collect();
     let scan_ms = scan_started.elapsed().as_millis();
 
     let reduce_started = Instant::now();
@@ -251,6 +268,7 @@ fn main() -> Result<()> {
     for record in &mut records {
         record.hostname = hostname.clone();
     }
+    assign_turn_indices(&mut records);
     let reduce_ms = reduce_started.elapsed().as_millis();
 
     let write_started = Instant::now();
@@ -550,6 +568,7 @@ fn run_merge(dir: &Path, double_clicked: bool) -> Result<()> {
             && a.response_id == b.response_id
             && a.details == b.details
     });
+    assign_turn_indices(&mut records);
 
     let hosts: std::collections::BTreeSet<String> =
         records.iter().map(|r| r.hostname.clone()).collect();
@@ -945,7 +964,7 @@ fn modified_after(path: &Path, cutoff: Option<&std::time::SystemTime>) -> bool {
     }
 }
 
-fn scan_file(path: &Path) -> FileScanResult {
+fn scan_file(path: &Path, project_map: &HashMap<PathBuf, String>) -> FileScanResult {
     let mut result = FileScanResult::default();
 
     let Ok(file) = File::open(path) else {
@@ -959,8 +978,12 @@ fn scan_file(path: &Path) -> FileScanResult {
         "copilot.cli.probe"
     };
 
+    let project = workspace_dir_for_session(path)
+        .and_then(|dir| project_map.get(&dir).cloned());
+
     let mut reader = BufReader::with_capacity(1024 * 1024, file);
-    let mut chat_title = None;
+    let mut custom_title: Option<String> = None;
+    let mut weak_title: Option<String> = None;
     let mut line_index = 0usize;
     let mut line = Vec::with_capacity(16 * 1024);
 
@@ -980,15 +1003,16 @@ fn scan_file(path: &Path) -> FileScanResult {
         line_index += 1;
         result.scanned_lines += 1;
 
-        if chat_title.is_none() && line_index <= 64 {
-            if let Some(title) = quick_extract_title_from_line(&line) {
-                chat_title = Some(title);
-            } else if contains_bytes(&line, b"customTitle") {
-                // Fallback for delta-jsonl shape: {"k":["customTitle"],"v":"…"}
-                if let Ok(value) = serde_json::from_slice::<Value>(&line) {
-                    if let Some(title) = extract_custom_title(&value) {
-                        chat_title = Some(title);
-                    }
+        // Title resolution: the authoritative session name is `customTitle`.
+        // Scan the header window for it and only fall back to a plain `title`
+        // when no customTitle exists anywhere, so an early JSON-schema title
+        // (e.g. the model's "Thinking Effort" label) can never win.
+        if custom_title.is_none() && line_index <= 64 {
+            if let Some(title) = extract_custom_title_from_line(&line) {
+                custom_title = Some(title);
+            } else if weak_title.is_none() {
+                if let Some(title) = extract_weak_title_from_line(&line) {
+                    weak_title = Some(title);
                 }
             }
         }
@@ -1020,6 +1044,10 @@ fn scan_file(path: &Path) -> FileScanResult {
                         request_id: local.request_id.clone(),
                         response_id: local.response_id.clone(),
                         agent_id: local.agent_id.clone(),
+                        project: project.clone(),
+                        duration_ms: local.total_elapsed_ms,
+                        turn_index: None,
+                        session_total: None,
                         file: path.to_string_lossy().into_owned(),
                         line: line_index,
                     });
@@ -1034,7 +1062,7 @@ fn scan_file(path: &Path) -> FileScanResult {
         }
     }
 
-    if let Some(title) = chat_title {
+    if let Some(title) = custom_title.or(weak_title) {
         for record in &mut result.records {
             record.chat_title = Some(title.clone());
         }
@@ -1139,6 +1167,122 @@ fn value_as_f64(value: &Value) -> Option<f64> {
     }
 }
 
+/// Returns the workspaceStorage/<hash> directory that owns a chatSessions file:
+/// `.../workspaceStorage/<hash>/chatSessions/<id>.jsonl` -> `.../workspaceStorage/<hash>`.
+fn workspace_dir_for_session(path: &Path) -> Option<PathBuf> {
+    let chat_sessions = path.parent()?;
+    if !chat_sessions
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("chatSessions"))
+    {
+        return None;
+    }
+    Some(chat_sessions.parent()?.to_path_buf())
+}
+
+/// Reads each workspace's `workspace.json` once and maps the storage directory
+/// to a friendly project name (the last segment of the opened folder/workspace).
+fn build_project_map(files: &[PathBuf]) -> HashMap<PathBuf, String> {
+    let mut map: HashMap<PathBuf, String> = HashMap::new();
+    let mut dirs: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::new();
+    for file in files {
+        if let Some(dir) = workspace_dir_for_session(file) {
+            dirs.insert(dir);
+        }
+    }
+    for dir in dirs {
+        if let Some(name) = read_project_name(&dir) {
+            map.insert(dir, name);
+        }
+    }
+    map
+}
+
+fn read_project_name(workspace_dir: &Path) -> Option<String> {
+    let text = fs::read_to_string(workspace_dir.join("workspace.json")).ok()?;
+    let value: Value = serde_json::from_str(&text).ok()?;
+    let object = value.as_object()?;
+    if let Some(folder) = object.get("folder").and_then(Value::as_str) {
+        return project_name_from_uri(folder, false);
+    }
+    if let Some(workspace) = object.get("workspace").and_then(Value::as_str) {
+        return project_name_from_uri(workspace, true);
+    }
+    None
+}
+
+/// Extracts a human-readable project name from a VS Code file URI.
+/// `file:///c%3A/Scripts/projects/opendecknew` -> `opendecknew`.
+/// A `.code-workspace` file URI returns the file stem.
+fn project_name_from_uri(uri: &str, is_workspace_file: bool) -> Option<String> {
+    let without_scheme = uri.strip_prefix("file://").unwrap_or(uri);
+    let decoded = percent_decode(without_scheme);
+    let trimmed = decoded.trim_end_matches(['/', '\\']);
+    let last = trimmed
+        .rsplit(|ch| ch == '/' || ch == '\\')
+        .find(|segment| !segment.is_empty())?;
+    let name = if is_workspace_file {
+        last.strip_suffix(".code-workspace").unwrap_or(last)
+    } else {
+        last
+    }
+    .trim();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_owned())
+    }
+}
+
+/// Minimal percent-decoding sufficient for VS Code workspace URIs.
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let hi = (bytes[index + 1] as char).to_digit(16);
+            let lo = (bytes[index + 2] as char).to_digit(16);
+            if let (Some(hi), Some(lo)) = (hi, lo) {
+                out.push((hi * 16 + lo) as u8);
+                index += 3;
+                continue;
+            }
+        }
+        out.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Assigns a 1-based `turn_index` within each parent session plus the session's
+/// total exchange count. Records must already be ordered chronologically within
+/// each `(hostname, session_id)` group, which both the scan and merge sorts
+/// guarantee.
+fn assign_turn_indices(records: &mut [UsageRecord]) {
+    let mut totals: HashMap<(String, String), u32> = HashMap::new();
+    for record in records.iter() {
+        if let Some(session) = record.session_id.as_ref() {
+            *totals
+                .entry((record.hostname.clone(), session.clone()))
+                .or_default() += 1;
+        }
+    }
+    let mut seen: HashMap<(String, String), u32> = HashMap::new();
+    for record in records.iter_mut() {
+        let Some(session) = record.session_id.clone() else {
+            record.turn_index = None;
+            record.session_total = None;
+            continue;
+        };
+        let key = (record.hostname.clone(), session);
+        let counter = seen.entry(key.clone()).or_default();
+        *counter += 1;
+        record.turn_index = Some(*counter);
+        record.session_total = totals.get(&key).copied();
+    }
+}
+
 fn merge_context_from_object(context: &mut ContextFields, map: &serde_json::Map<String, Value>) {
     assign_string(&mut context.session_id, map, "sessionId");
     assign_string(&mut context.request_id, map, "requestId");
@@ -1162,6 +1306,18 @@ fn merge_context_from_object(context: &mut ContextFields, map: &serde_json::Map<
 
     if let Some(completed_at) = map.get("completedAt").and_then(Value::as_i64) {
         context.timestamp_ms = Some(completed_at);
+    }
+
+    // The chat-session `result` node carries wall-clock timing for the whole
+    // exchange (request submitted -> response completed) under `timings`.
+    if context.total_elapsed_ms.is_none() {
+        if let Some(Value::Object(timings)) = map.get("timings") {
+            if let Some(elapsed) = timings.get("totalElapsed").and_then(Value::as_i64) {
+                if elapsed > 0 {
+                    context.total_elapsed_ms = Some(elapsed);
+                }
+            }
+        }
     }
 }
 
@@ -1259,6 +1415,10 @@ fn collect_records_from_text(
             request_id: None,
             response_id: None,
             agent_id: None,
+            project: None,
+            duration_ms: None,
+            turn_index: None,
+            session_total: None,
             file: path.to_string_lossy().into_owned(),
             line: line_number,
         });
@@ -1335,6 +1495,9 @@ fn merge_context_missing(target: &mut ContextFields, source: &ContextFields) {
     if target.timestamp_ms.is_none() {
         target.timestamp_ms = source.timestamp_ms;
     }
+    if target.total_elapsed_ms.is_none() {
+        target.total_elapsed_ms = source.total_elapsed_ms;
+    }
 }
 
 fn extract_custom_title(value: &Value) -> Option<String> {
@@ -1359,42 +1522,82 @@ fn extract_custom_title(value: &Value) -> Option<String> {
 /// session document. Handles both shapes we have seen:
 ///   - delta jsonl header   : {"k":["customTitle"],"v":"…"}
 ///   - single-object session: {"kind":0,"v":{"customTitle":"…", "title":"…", …}}
+#[cfg(test)]
 fn quick_extract_title_from_line(line: &[u8]) -> Option<String> {
     const NEEDLES: [&[u8]; 2] = [b"\"customTitle\":\"", b"\"title\":\""];
     for needle in NEEDLES {
-        let mut search_from = 0;
-        while let Some(rel) = memmem::find(&line[search_from..], needle) {
-            let start = search_from + rel;
-            // Include the opening quote so serde_json can decode the literal.
-            let literal_start = start + needle.len() - 1;
-            let mut cursor = literal_start + 1;
-            while cursor < line.len() {
-                let byte = line[cursor];
-                if byte == b'\\' {
-                    cursor += 2;
-                    continue;
-                }
-                if byte == b'"' {
-                    break;
-                }
-                cursor += 1;
-            }
-            if cursor >= line.len() {
-                break;
-            }
-            let literal = &line[literal_start..=cursor];
-            if let Ok(text) = std::str::from_utf8(literal) {
-                if let Ok(decoded) = serde_json::from_str::<String>(text) {
-                    let trimmed = decoded.trim();
-                    if !trimmed.is_empty() {
-                        return Some(trimmed.to_owned());
-                    }
-                }
-            }
-            search_from = cursor + 1;
+        if let Some(title) = extract_json_string_after(line, needle) {
+            return Some(title);
         }
     }
     None
+}
+
+/// Walks the bytes after `needle` (which must end at the opening quote of a JSON
+/// string) and decodes the first complete JSON string literal that follows.
+fn extract_json_string_after(line: &[u8], needle: &[u8]) -> Option<String> {
+    let mut search_from = 0;
+    while let Some(rel) = memmem::find(&line[search_from..], needle) {
+        let start = search_from + rel;
+        // Include the opening quote so serde_json can decode the literal.
+        let literal_start = start + needle.len() - 1;
+        let mut cursor = literal_start + 1;
+        while cursor < line.len() {
+            let byte = line[cursor];
+            if byte == b'\\' {
+                cursor += 2;
+                continue;
+            }
+            if byte == b'"' {
+                break;
+            }
+            cursor += 1;
+        }
+        if cursor >= line.len() {
+            break;
+        }
+        let literal = &line[literal_start..=cursor];
+        if let Ok(text) = std::str::from_utf8(literal) {
+            if let Ok(decoded) = serde_json::from_str::<String>(text) {
+                let trimmed = decoded.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_owned());
+                }
+            }
+        }
+        search_from = cursor + 1;
+    }
+    None
+}
+
+/// Extracts the authoritative session `customTitle` from a single line, covering
+/// both the inline (`"customTitle":"…"`) and delta (`{"k":["customTitle"],"v":…}`)
+/// shapes.
+fn extract_custom_title_from_line(line: &[u8]) -> Option<String> {
+    if let Some(title) = extract_json_string_after(line, b"\"customTitle\":\"") {
+        return Some(title);
+    }
+    if contains_bytes(line, b"customTitle") {
+        if let Ok(value) = serde_json::from_slice::<Value>(line) {
+            if let Some(title) = extract_custom_title(&value) {
+                return Some(title);
+            }
+        }
+    }
+    None
+}
+
+/// Extracts a plain `"title"` as a weak fallback, skipping JSON-schema lines
+/// (e.g. a model's `{"reasoningEffort":{"title":"Thinking Effort","enum":[…]}}`)
+/// whose `title` is a UI label, not the session title.
+fn extract_weak_title_from_line(line: &[u8]) -> Option<String> {
+    if contains_bytes(line, b"\"enum\"")
+        || contains_bytes(line, b"\"properties\"")
+        || contains_bytes(line, b"reasoningEffort")
+    {
+        return None;
+    }
+    extract_json_string_after(line, b"\"title\":\"")
 }
 
 fn detect_hostname() -> String {
@@ -1456,6 +1659,8 @@ fn default_html_path(output_path: &Path, hostname: &str) -> PathBuf {
 
 const REPORT_TEMPLATE: &str = include_str!("report-template.html");
 const REPORT_DATA_PLACEHOLDER: &str = "__GH_USAGE_DATA__";
+const REPORT_SNAPDOM: &str = include_str!("snapdom.js");
+const REPORT_SNAPDOM_PLACEHOLDER: &str = "__GH_USAGE_SNAPDOM__";
 
 fn write_html(path: &Path, records: &[UsageRecord], primary_host: &str) -> Result<()> {
     let payload = serde_json::json!({
@@ -1469,7 +1674,11 @@ fn write_html(path: &Path, records: &[UsageRecord], primary_host: &str) -> Resul
     // so any "</" inside string values is escaped to "<\/" which is still valid JSON.
     data = data.replace("</", "<\\/");
 
-    let html = REPORT_TEMPLATE.replace(REPORT_DATA_PLACEHOLDER, &data);
+    // Inject the snapdom library first (its own <script> block), then the JSON
+    // data. The library is inserted verbatim and is NOT subject to the data escaping.
+    let html = REPORT_TEMPLATE
+        .replace(REPORT_SNAPDOM_PLACEHOLDER, REPORT_SNAPDOM)
+        .replace(REPORT_DATA_PLACEHOLDER, &data);
 
     let mut file = File::create(path)
         .with_context(|| format!("failed to create HTML output {}", path.display()))?;
