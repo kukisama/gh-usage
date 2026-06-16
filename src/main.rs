@@ -171,10 +171,14 @@ struct RawUsageRecord {
 fn main() -> Result<()> {
     let total_started = Instant::now();
     let no_args = env::args_os().len() == 1;
-    // Originally gated on `launched_from_explorer()` so we'd only prompt on
-    // double-click. Now we also prompt for plain `gh-usage.exe` runs in any
-    // terminal, so the user always gets the HTML auto-open offer.
-    let double_clicked = no_args;
+    // Only pause for the "press any key" prompt when the program was actually
+    // launched by double-clicking from Explorer, where the console window would
+    // otherwise vanish before the user can read it. Plain terminal runs — and
+    // automated environments such as CI or the winget package-validation
+    // sandbox, where stdin still looks like a real console — must never block
+    // waiting for a keypress, otherwise installation verification hangs and the
+    // detection step can never complete.
+    let double_clicked = no_args && launched_from_explorer();
     let cli = Cli::parse();
 
     if let Some(dir) = cli.merge.clone() {
@@ -362,11 +366,11 @@ fn open_path(path: &Path) {
 #[cfg(not(windows))]
 fn open_path(_path: &Path) {}
 
-// Retained for potential future use (e.g. tailoring messaging when launched
-// from Explorer vs. a terminal). Currently unused since we always show the
-// prompt for argument-less runs.
+// True only when the immediate parent process is Explorer, i.e. the user
+// double-clicked `gh-usage.exe`. This is the one case where we want to keep the
+// console window open with a "press any key" prompt; every other launch context
+// (terminals, CI, the winget validation sandbox) must exit without blocking.
 #[cfg(windows)]
-#[allow(dead_code)]
 fn launched_from_explorer() -> bool {
     windows_parent_process_name()
         .as_deref()
@@ -374,7 +378,6 @@ fn launched_from_explorer() -> bool {
 }
 
 #[cfg(not(windows))]
-#[allow(dead_code)]
 fn launched_from_explorer() -> bool {
     false
 }
@@ -421,7 +424,6 @@ fn wait_for_any_key() {
 fn wait_for_any_key() {}
 
 #[cfg(windows)]
-#[allow(dead_code)]
 fn windows_parent_process_name() -> Option<String> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
@@ -479,7 +481,6 @@ fn windows_parent_process_name() -> Option<String> {
 }
 
 #[cfg(windows)]
-#[allow(dead_code)]
 fn wide_process_name_to_string(buffer: &[u16]) -> Option<String> {
     let len = buffer.iter().position(|ch| *ch == 0).unwrap_or(buffer.len());
     if len == 0 {
@@ -1698,10 +1699,19 @@ fn write_html(path: &Path, records: &[UsageRecord], primary_host: &str) -> Resul
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_line_extraction, extract_custom_title, parse_credit_details,
-        quick_extract_title_from_line, ContextFields, LineExtraction,
+        collect_line_extraction, extract_custom_title, launched_from_explorer,
+        parse_credit_details, quick_extract_title_from_line, ContextFields, LineExtraction,
     };
     use serde_json::json;
+
+    #[test]
+    fn automated_runs_are_not_treated_as_double_click() {
+        // The test binary is launched by Cargo/CI, never by double-clicking from
+        // Explorer. The same is true inside the winget validation sandbox, so the
+        // "press any key" prompt must stay disabled and the program must never
+        // block waiting for a keypress (which would stall installation detection).
+        assert!(!launched_from_explorer());
+    }
 
     #[test]
     fn parses_credit_details_with_bullet_separator() {

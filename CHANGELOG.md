@@ -8,6 +8,16 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.2] — 2026-06-16
+
+A follow-up to 1.2.1 that finally stops automated package validation from stalling.
+
+### Fixed
+
+- **No more stalled winget validation.** The 1.2.1 "don't pause without a console" check still saw a real console inside the winget package-validation sandbox, so the app kept waiting for a keypress and installation detection never finished. The "press any key to open the report" prompt now appears only when you actually double-click `gh-usage.exe` from Explorer. Terminal, CI, and validation-sandbox runs write the report files and exit immediately.
+
+---
+
 ## [1.2.1] — 2026-06-16
 
 A small fix that keeps the app well-behaved when no one's watching.
@@ -63,7 +73,8 @@ The first stable release — fast, local, and to the point.
 
 ---
 
-[Unreleased]: https://github.com/kukisama/gh-usage/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/kukisama/gh-usage/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.2
 [1.2.1]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.1
 [1.2.0]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.0
 [1.1.0]: https://github.com/kukisama/gh-usage/releases/tag/v1.1.0
