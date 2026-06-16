@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -301,11 +301,20 @@ fn main() -> Result<()> {
         }
     }
 
-    if double_clicked {
+    if double_clicked && console_is_interactive() {
         show_double_click_exit_notice(&output_path, html_path.as_deref());
     }
 
     Ok(())
+}
+
+/// Returns true only when the program is attached to a real interactive
+/// console. In non-interactive environments (CI, piped/redirected I/O, the
+/// winget installation-verification sandbox) stdin is not a terminal, so we
+/// must not pause for a keypress or auto-open the browser — the files are
+/// already written and we exit cleanly with code 0.
+fn console_is_interactive() -> bool {
+    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
 }
 
 fn show_double_click_exit_notice(output: &Path, html: Option<&Path>) {
@@ -650,7 +659,7 @@ fn run_merge(dir: &Path, double_clicked: bool) -> Result<()> {
     out.push_str(&plain_border());
     print!("{out}");
 
-    if double_clicked {
+    if double_clicked && console_is_interactive() {
         show_merge_exit_notice(&html_path, &host_list);
     }
     Ok(())

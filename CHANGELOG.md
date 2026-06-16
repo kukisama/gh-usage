@@ -8,6 +8,16 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.1] — 2026-06-16
+
+A small fix that keeps the app well-behaved when no one's watching.
+
+### Fixed
+
+- **No more hanging in non-interactive environments.** When run without a real console — in CI, through a pipe, or inside automated package-validation sandboxes — the app no longer waits for a keypress or tries to open a browser. It just writes the report files and exits cleanly. Double-click and terminal runs still get the familiar "press any key to open the report" prompt.
+
+---
+
 ## [1.2.0] — 2026-06-14
 
 Polishing the report into something you can confidently share with anyone.
@@ -53,7 +63,8 @@ The first stable release — fast, local, and to the point.
 
 ---
 
-[Unreleased]: https://github.com/kukisama/gh-usage/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/kukisama/gh-usage/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.1
 [1.2.0]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.0
 [1.1.0]: https://github.com/kukisama/gh-usage/releases/tag/v1.1.0
 [1.0.0]: https://github.com/kukisama/gh-usage/releases/tag/v1.0.0

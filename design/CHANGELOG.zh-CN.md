@@ -8,6 +8,16 @@
 
 ---
 
+## [1.2.1] — 2026-06-16
+
+一个小修复，让程序在没人盯着时也能乖乖收尾。
+
+### 修复
+
+- **非交互环境下不再卡住。** 当没有真实控制台时——比如在 CI、通过管道运行，或在自动化的包校验沙箱里——程序不再等待按键，也不会尝试打开浏览器，而是写完报告文件后干净退出。双击运行和终端运行依旧保留你熟悉的「按任意键打开报告」提示。
+
+---
+
 ## [1.2.0] — 2026-06-14
 
 把报告打磨得能放心分享给任何人。
@@ -53,7 +63,8 @@
 
 ---
 
-[未发布]: https://github.com/kukisama/gh-usage/compare/v1.2.0...HEAD
+[未发布]: https://github.com/kukisama/gh-usage/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.1
 [1.2.0]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.0
 [1.1.0]: https://github.com/kukisama/gh-usage/releases/tag/v1.1.0
 [1.0.0]: https://github.com/kukisama/gh-usage/releases/tag/v1.0.0
