@@ -150,7 +150,7 @@ jobs:
 
           Copy-Item (Join-Path $PWD "target/release/$env:BINARY_NAME") $packageRoot
           Copy-Item (Join-Path $PWD 'README.md') $packageRoot
-          Copy-Item (Join-Path $PWD 'README.zh-CN.md') $packageRoot
+          Copy-Item (Join-Path $PWD 'design/README.zh-CN.md') $packageRoot
           Copy-Item (Join-Path $PWD 'LICENSE') $packageRoot
 
           Compress-Archive -Path (Join-Path $packageRoot '*') -DestinationPath (Join-Path $dist "$assetBase.zip") -Force
