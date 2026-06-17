@@ -171,10 +171,13 @@ struct RawUsageRecord {
 fn main() -> Result<()> {
     let total_started = Instant::now();
     let no_args = env::args_os().len() == 1;
-    // Originally gated on `launched_from_explorer()` so we'd only prompt on
-    // double-click. Now we also prompt for plain `gh-usage.exe` runs in any
-    // terminal, so the user always gets the HTML auto-open offer.
-    let double_clicked = no_args;
+    // Treat this as a true double-click only when launched directly from
+    // Explorer (parent process is explorer.exe). Terminal runs, CI, and the
+    // winget package-validation sandbox all have a different parent process, so
+    // they skip the keypress pause entirely and exit cleanly after writing the
+    // report files. This is what keeps automated installation verification from
+    // hanging on `wait_for_any_key()`.
+    let double_clicked = no_args && launched_from_explorer();
     let cli = Cli::parse();
 
     if let Some(dir) = cli.merge.clone() {
@@ -338,18 +341,22 @@ fn show_double_click_exit_notice(output: &Path, html: Option<&Path>) {
         println!(
             "  filters, and a paginated record table. Safe to email or archive."
         );
-        println!();
-        println!(">> Press any key to open the HTML report in your default browser.");
-        println!("   (Or close this window to skip - both files are already on disk.)");
-        wait_for_any_key();
+        // Open the report automatically so viewing it never requires a keypress.
+        // This branch only runs on a genuine Explorer double-click; terminal,
+        // CI, and the winget validation sandbox never reach here.
         open_path(html);
+        println!();
+        println!(">> The report has been opened in your default browser.");
+        println!("   If it didn't open, double-click the HTML file above, or run");
+        println!("   `gh-usage --html <PATH>` to regenerate it at a path you choose.");
     } else {
         println!();
         println!("HTML report skipped (--no-html). The CSV above is your full dataset.");
-        println!();
-        println!(">> Press any key to close this window. The CSV is already saved.");
-        wait_for_any_key();
+        println!("   Re-run without --no-html (or `gh-usage --html <PATH>`) to build it.");
     }
+    println!();
+    println!(">> Press any key to close this window. Your files are already saved.");
+    wait_for_any_key();
 }
 
 #[cfg(windows)]
@@ -362,11 +369,11 @@ fn open_path(path: &Path) {
 #[cfg(not(windows))]
 fn open_path(_path: &Path) {}
 
-// Retained for potential future use (e.g. tailoring messaging when launched
-// from Explorer vs. a terminal). Currently unused since we always show the
-// prompt for argument-less runs.
+// Detects whether the process was launched by double-clicking the executable
+// in Windows Explorer (parent process is explorer.exe). We use this to gate the
+// keypress pause so only genuine double-clicks wait for a key; terminal, CI, and
+// the winget validation sandbox have a different parent and exit immediately.
 #[cfg(windows)]
-#[allow(dead_code)]
 fn launched_from_explorer() -> bool {
     windows_parent_process_name()
         .as_deref()
@@ -374,7 +381,6 @@ fn launched_from_explorer() -> bool {
 }
 
 #[cfg(not(windows))]
-#[allow(dead_code)]
 fn launched_from_explorer() -> bool {
     false
 }
@@ -421,7 +427,6 @@ fn wait_for_any_key() {
 fn wait_for_any_key() {}
 
 #[cfg(windows)]
-#[allow(dead_code)]
 fn windows_parent_process_name() -> Option<String> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
@@ -679,11 +684,14 @@ fn show_merge_exit_notice(html: &Path, hosts: &[&str]) {
     println!(
         "  and the single file is safe to email or archive."
     );
-    println!();
-    println!(">> Press any key to open the merged report in your default browser.");
-    println!("   (Or close this window to skip - the HTML is already on disk.)");
-    wait_for_any_key();
+    // Open automatically; only reached on a real Explorer double-click.
     open_path(html);
+    println!();
+    println!(">> The merged report has been opened in your default browser.");
+    println!("   If it didn't open, double-click the HTML file above.");
+    println!();
+    println!(">> Press any key to close this window. The HTML is already saved.");
+    wait_for_any_key();
 }
 
 fn build_summary_report(

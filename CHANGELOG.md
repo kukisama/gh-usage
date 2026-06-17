@@ -8,6 +8,16 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.2] — 2026-06-17
+
+A follow-up fix that finally stops automated installers from getting stuck.
+
+### Fixed
+
+- **Package-validation sandboxes no longer hang.** The 1.2.1 fix relied on detecting whether the console was interactive, but inside winget's installation-verification sandbox the console still looks like a real terminal, so the app kept waiting for a keypress and timed out. The keypress pause now triggers only when you actually double-click `gh-usage.exe` from Explorer. Terminal, CI, and package-validation runs write the report files and exit cleanly. On double-click the HTML report now opens automatically — no keypress needed to view it.
+
+---
+
 ## [1.2.1] — 2026-06-16
 
 A small fix that keeps the app well-behaved when no one's watching.
