@@ -73,6 +73,8 @@ A per-project bar chart lets you click to filter, and a "top sessions by credits
 
 The records table supports keyword search, filtering by model and source, click-to-sort columns, and pagination. The screenshot below has privacy mode on — sensitive fields are masked automatically.
 
+For Copilot CLI records, `events.jsonl` remains the traceable source while SQLite supplies precise credits and timing. Open a row's source popover and choose **Open** to jump to the matching JSONL event line in VS Code.
+
 ![Records table with privacy mask on](design/dashboard-records.jpg)
 
 ### Sidebar filters
@@ -126,10 +128,10 @@ Double-click the HTML file. Search, filter, switch language, toggle privacy, and
 
 ## 🛠️ Common commands
 
-Include GitHub Copilot CLI records:
+VS Code and GitHub Copilot CLI records are both included by default. To scan VS Code only:
 
 ```powershell
-gh-usage --include-cli-logs
+gh-usage --no-cli-logs
 ```
 
 Scan only the last week:
@@ -174,14 +176,15 @@ Each row is one usage record. Common fields include machine name, local time, se
 
 - It only reads files that exist locally; deleted history can't be recovered.
 - Records without credit details are skipped.
-- It uses your system's standard VS Code data directory by default, and supports custom paths.
+- Copilot CLI event JSONL is the primary trace. The session title comes from `workspace.yaml.name` (or the first real JSONL user message when unnamed), and `workspace.yaml.cwd` identifies the project. `session-store.db` contributes exact credits, duration, and turn metadata only when its usage row matches a JSONL response.
+- It uses your system's standard VS Code and Copilot CLI data directories by default, and supports custom paths.
 
 ---
 
 ## 📚 Options
 
 ```text
---include-cli-logs       Include GitHub Copilot CLI records
+--no-cli-logs            Skip GitHub Copilot CLI records
 --since-days <N>         Only scan files modified within the last N days
 --output <PATH>          Write CSV or JSON to a specific path
 --html <PATH>            Write the HTML report to a specific path

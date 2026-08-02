@@ -73,6 +73,8 @@
 
 明细记录表支持关键词搜索、按模型/来源筛选、点击表头排序和分页。下图开启了隐私模式，敏感字段已自动打码。
 
+对于 Copilot CLI 记录，`events.jsonl` 保持为可追溯的主来源，SQLite 负责补充精确 credits 和耗时。在记录来源弹层中点击「打开」，即可在 VS Code 中跳到对应的 JSONL 事件行。
+
 ![明细记录表（已开启隐私遮蔽）](dashboard-records.jpg)
 
 ### 侧边栏筛选
@@ -126,10 +128,10 @@ gh-usage
 
 ## 🛠️ 常用命令
 
-纳入 Copilot CLI 的记录：
+默认会同时纳入 VS Code 和 GitHub Copilot CLI 记录。若只扫描 VS Code：
 
 ```powershell
-gh-usage --include-cli-logs
+gh-usage --no-cli-logs
 ```
 
 只扫描最近一周：
@@ -174,14 +176,15 @@ gh-usage --merge .\shared\copilot-usage
 
 - 只扫描本机已有的文件，已删除的历史无法重建。
 - 没有额度明细的记录会被跳过。
-- 默认使用当前系统标准的 VS Code 数据目录，也支持自定义路径。
+- Copilot CLI 以事件 JSONL 作为主要追溯记录；会话标题取 `workspace.yaml.name`（未命名时回退 JSONL 首条真实用户消息），项目取 `workspace.yaml.cwd`。仅当 SQLite 用量行成功匹配 JSONL 响应时，`session-store.db` 才补充精确 credits、耗时和轮次字段。
+- 默认使用当前系统标准的 VS Code 与 Copilot CLI 数据目录，也支持自定义路径。
 
 ---
 
 ## 📚 选项一览
 
 ```text
---include-cli-logs       同时纳入 GitHub Copilot CLI 记录
+--no-cli-logs             跳过 GitHub Copilot CLI 记录
 --since-days <N>          只扫描最近 N 天内修改过的文件
 --output <PATH>           将 CSV 或 JSON 写到指定路径
 --html <PATH>             将 HTML 报告写到指定路径

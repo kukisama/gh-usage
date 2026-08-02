@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, IsTerminal, Write};
@@ -10,6 +10,7 @@ use chrono::{DateTime, Local, Utc};
 use clap::{Parser, ValueEnum};
 use memchr::memmem;
 use rayon::prelude::*;
+use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use walkdir::WalkDir;
@@ -25,13 +26,17 @@ struct Cli {
     #[arg(long)]
     vscode_workspace_storage: Option<PathBuf>,
 
-    /// Copilot CLI root. Reserved for optional probing; defaults to ~/.copilot.
+    /// Copilot CLI root. Defaults to ~/.copilot.
     #[arg(long)]
     copilot_cli_root: Option<PathBuf>,
 
-    /// Include generic Copilot CLI log probing. Slower and currently best-effort.
-    #[arg(long)]
+    /// Include Copilot CLI records (kept for compatibility; CLI scanning is now enabled by default).
+    #[arg(long, hide = true)]
     include_cli_logs: bool,
+
+    /// Skip Copilot CLI records and only scan VS Code chat sessions.
+    #[arg(long)]
+    no_cli_logs: bool,
 
     /// Only scan files modified within N days.
     #[arg(long)]
@@ -168,6 +173,55 @@ struct RawUsageRecord {
     details: String,
 }
 
+#[derive(Debug)]
+struct CliUsageAggregate {
+    source_path: PathBuf,
+    source_line: usize,
+    session_id: String,
+    turn_index: Option<u32>,
+    model: String,
+    credits: f64,
+    request_count: usize,
+    started_at_ms: i64,
+    completed_at_ms: i64,
+    title: Option<String>,
+    project: Option<String>,
+}
+
+#[derive(Debug)]
+struct CliEventMessage {
+    line: usize,
+    timestamp_ms: i64,
+    model: String,
+    is_subagent: bool,
+    api_call_id: String,
+}
+
+#[derive(Debug)]
+struct CliShutdownMetric {
+    line: usize,
+    timestamp_ms: i64,
+    model: String,
+    credits: f64,
+}
+
+#[derive(Debug, Default)]
+struct CliSessionEvents {
+    path: PathBuf,
+    scanned_lines: usize,
+    title: Option<String>,
+    project: Option<String>,
+    messages: Vec<CliEventMessage>,
+    used_api_calls: HashSet<String>,
+    shutdown_metrics: Vec<CliShutdownMetric>,
+}
+
+#[derive(Debug, Default)]
+struct CliWorkspaceMetadata {
+    title: Option<String>,
+    project: Option<String>,
+}
+
 fn main() -> Result<()> {
     let total_started = Instant::now();
     let no_args = env::args_os().len() == 1;
@@ -217,10 +271,20 @@ fn main() -> Result<()> {
 
     let discover_started = Instant::now();
     let mut files = collect_vscode_chat_session_files(&vscode_root, cutoff.as_ref())?;
+    let mut cli_database_result = None;
 
-    if cli.include_cli_logs {
-        if let Some(root) = copilot_cli_root.as_ref() {
-            files.extend(collect_cli_probe_files(root, cutoff.as_ref())?);
+    if (!cli.no_cli_logs || cli.include_cli_logs)
+        && let Some(root) = copilot_cli_root.as_ref()
+    {
+        match scan_cli_usage_database(root, cutoff.as_ref()) {
+            Ok(Some(result)) => cli_database_result = Some(result),
+            Ok(None) => files.extend(collect_cli_probe_files(root, cutoff.as_ref())?),
+            Err(error) => {
+                eprintln!(
+                    "warning: could not read Copilot CLI session store ({error:#}); falling back to logs"
+                );
+                files.extend(collect_cli_probe_files(root, cutoff.as_ref())?);
+            }
         }
     }
 
@@ -232,13 +296,16 @@ fn main() -> Result<()> {
     }
     let discover_ms = discover_started.elapsed().as_millis();
 
-    let scanned_files = files.len();
+    let scanned_files = files.len() + usize::from(cli_database_result.is_some());
     let project_map = build_project_map(&files);
     let scan_started = Instant::now();
-    let file_results: Vec<FileScanResult> = files
+    let mut file_results: Vec<FileScanResult> = files
         .par_iter()
         .map(|path| scan_file(path, &project_map))
         .collect();
+    if let Some(result) = cli_database_result {
+        file_results.push(result);
+    }
     let scan_ms = scan_started.elapsed().as_millis();
 
     let reduce_started = Instant::now();
@@ -962,6 +1029,467 @@ fn collect_cli_probe_files(
     Ok(files)
 }
 
+/// Correlates Copilot CLI `events.jsonl` traces with the precise usage ledger.
+/// Newer CLI builds persist every model call in `assistant_usage_events`,
+/// including calls from an active session, while JSONL remains the report's
+/// traceable source path. Returning `None` means this is an older store and the
+/// caller should use the generic JSONL/log probe instead.
+fn scan_cli_usage_database(
+    root: &Path,
+    cutoff: Option<&std::time::SystemTime>,
+) -> Result<Option<FileScanResult>> {
+    let path = root.join("session-store.db");
+    if !path.is_file() {
+        return Ok(None);
+    }
+
+    let connection = Connection::open_with_flags(
+        &path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .with_context(|| format!("open Copilot CLI database {}", path.display()))?;
+
+    let has_usage_table: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'assistant_usage_events')",
+            [],
+            |row| row.get(0),
+        )
+        .with_context(|| format!("inspect Copilot CLI database {}", path.display()))?;
+    if !has_usage_table {
+        return Ok(None);
+    }
+
+    let cutoff_ms = cutoff.and_then(system_time_to_unix_ms);
+    scan_cli_usage_connection(&connection, &path, cutoff_ms).map(Some)
+}
+
+fn scan_cli_usage_connection(
+    connection: &Connection,
+    source_path: &Path,
+    cutoff_ms: Option<i64>,
+) -> Result<FileScanResult> {
+    const NANO_AIU_PER_CREDIT: f64 = 1_000_000_000.0;
+    let mut result = FileScanResult::default();
+    let cli_root = source_path.parent().unwrap_or_else(|| Path::new(""));
+    let mut session_events = load_cli_session_events(cli_root);
+    result.scanned_lines += session_events
+        .values()
+        .map(|events| events.scanned_lines)
+        .sum::<usize>();
+    let query =
+        "SELECT u.session_id, u.turn_index, u.model, u.total_nano_aiu,
+                u.duration_ms, u.created_at, u.agent_id
+         FROM assistant_usage_events u
+         WHERE u.total_nano_aiu IS NOT NULL AND u.total_nano_aiu > 0
+         ORDER BY u.session_id, u.turn_index, u.model, u.created_at, u.id";
+    let mut statement = connection.prepare(query)?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<i64>>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, Option<i64>>(4)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, Option<String>>(6)?,
+        ))
+    })?;
+
+    let mut aggregates: BTreeMap<(String, Option<u32>, String), CliUsageAggregate> =
+        BTreeMap::new();
+    let mut sessions_with_database_usage = HashSet::new();
+    for row in rows {
+        result.scanned_lines += 1;
+        result.json_candidate_lines += 1;
+        let (
+            session_id,
+            zero_based_turn,
+            model,
+            total_nano_aiu,
+            duration_ms,
+            created_at,
+            agent_id,
+        ) = row?;
+        let Some(completed_at_ms) = parse_rfc3339_timestamp_ms(&created_at) else {
+            result.parse_errors += 1;
+            continue;
+        };
+        let Some((record_source_path, record_source_line, event_timestamp_ms)) =
+            match_cli_event_message(
+            &mut session_events,
+            &session_id,
+            completed_at_ms,
+            &model,
+            agent_id_is_present(&agent_id),
+        )
+        else {
+            continue;
+        };
+        sessions_with_database_usage.insert(session_id.clone());
+        if cutoff_ms.is_some_and(|cutoff| event_timestamp_ms < cutoff) {
+            continue;
+        }
+
+        let (title, project) = session_events
+            .get(&session_id)
+            .map(|events| (events.title.clone(), events.project.clone()))
+            .unwrap_or_default();
+        let turn_index = zero_based_turn.and_then(|turn| {
+            turn.checked_add(1)
+                .and_then(|turn| u32::try_from(turn).ok())
+        });
+        let key = (session_id.clone(), turn_index, model.clone());
+        let duration_ms = duration_ms.unwrap_or_default().max(0);
+        let started_at_ms = event_timestamp_ms.saturating_sub(duration_ms);
+
+        let entry = aggregates.entry(key).or_insert_with(|| CliUsageAggregate {
+            source_path: record_source_path.clone(),
+            source_line: record_source_line,
+            session_id,
+            turn_index,
+            model,
+            credits: 0.0,
+            request_count: 0,
+            started_at_ms,
+            completed_at_ms: event_timestamp_ms,
+            title: title.clone(),
+            project: project.clone(),
+        });
+        if record_source_line < entry.source_line {
+            entry.source_path = record_source_path;
+            entry.source_line = record_source_line;
+        }
+        entry.credits += total_nano_aiu as f64 / NANO_AIU_PER_CREDIT;
+        entry.request_count += 1;
+        entry.started_at_ms = entry.started_at_ms.min(started_at_ms);
+        entry.completed_at_ms = entry.completed_at_ms.max(event_timestamp_ms);
+        if entry.title.is_none() {
+            entry.title = title;
+        }
+        if entry.project.is_none() {
+            entry.project = project;
+        }
+    }
+
+    let mut session_totals: HashMap<String, u32> = HashMap::new();
+    for aggregate in aggregates.values() {
+        if let Some(turn) = aggregate.turn_index {
+            session_totals
+                .entry(aggregate.session_id.clone())
+                .and_modify(|total| *total = (*total).max(turn))
+                .or_insert(turn);
+        }
+    }
+
+    for aggregate in aggregates.into_values() {
+        let duration_ms = aggregate
+            .completed_at_ms
+            .saturating_sub(aggregate.started_at_ms);
+        let details = format!(
+            "Copilot CLI {} ({} model call{}) • {} credits",
+            aggregate.model,
+            aggregate.request_count,
+            if aggregate.request_count == 1 {
+                ""
+            } else {
+                "s"
+            },
+            aggregate.credits
+        );
+        result.records.push(UsageRecord {
+            source: "copilot.cli.events".to_owned(),
+            hostname: String::new(),
+            timestamp_ms: Some(aggregate.completed_at_ms),
+            local_time_hint: format_local_time(aggregate.completed_at_ms),
+            chat_title: aggregate.title,
+            model: aggregate.model.clone(),
+            model_id: Some(aggregate.model),
+            credits: aggregate.credits,
+            details,
+            session_id: Some(aggregate.session_id.clone()),
+            request_id: None,
+            response_id: None,
+            agent_id: None,
+            project: aggregate.project,
+            duration_ms: (duration_ms > 0).then_some(duration_ms),
+            turn_index: aggregate.turn_index,
+            session_total: session_totals.get(&aggregate.session_id).copied(),
+            file: aggregate.source_path.to_string_lossy().into_owned(),
+            line: aggregate.source_line,
+        });
+    }
+
+    append_legacy_cli_shutdown_records(
+        &mut result,
+        &session_events,
+        &sessions_with_database_usage,
+        cutoff_ms,
+    );
+
+    Ok(result)
+}
+
+fn agent_id_is_present(agent_id: &Option<String>) -> bool {
+    agent_id.as_ref().is_some_and(|agent| !agent.is_empty())
+}
+
+fn load_cli_session_events(root: &Path) -> HashMap<String, CliSessionEvents> {
+    let session_root = root.join("session-state");
+    let Ok(entries) = fs::read_dir(session_root) else {
+        return HashMap::new();
+    };
+    let mut sessions = HashMap::new();
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let session_id = entry.file_name().to_string_lossy().into_owned();
+        let path = entry.path().join("events.jsonl");
+        if let Some(events) = read_cli_session_events(&path) {
+            sessions.insert(session_id, events);
+        }
+    }
+    sessions
+}
+
+fn read_cli_session_events(path: &Path) -> Option<CliSessionEvents> {
+    let file = File::open(path).ok()?;
+    let workspace = path
+        .parent()
+        .map(read_cli_workspace_metadata)
+        .unwrap_or_default();
+    let mut events = CliSessionEvents {
+        path: path.to_path_buf(),
+        title: workspace.title,
+        project: workspace.project,
+        ..CliSessionEvents::default()
+    };
+    let reader = BufReader::with_capacity(1024 * 1024, file);
+    for (index, line) in reader.split(b'\n').enumerate() {
+        events.scanned_lines += 1;
+        let Ok(line) = line else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_slice::<Value>(&line) else {
+            continue;
+        };
+        let Some(object) = value.as_object() else {
+            continue;
+        };
+        let Some(timestamp_ms) = object
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .and_then(parse_rfc3339_timestamp_ms)
+        else {
+            continue;
+        };
+        let line_number = index + 1;
+        let event_type = object.get("type").and_then(Value::as_str);
+        let data = object.get("data").and_then(Value::as_object);
+        if event_type == Some("user.message") && events.title.is_none() {
+            let is_root_user_message = object
+                .get("agentId")
+                .and_then(Value::as_str)
+                .is_none_or(str::is_empty)
+                && data
+                    .and_then(|data| data.get("source"))
+                    .is_none_or(Value::is_null);
+            if is_root_user_message {
+                events.title = data
+                    .and_then(|data| data.get("content"))
+                    .and_then(Value::as_str)
+                    .and_then(|content| normalized_cli_title(Some(content)));
+            }
+        } else if event_type == Some("assistant.message") {
+            let Some(data) = data else {
+                continue;
+            };
+            let Some(model) = data.get("model").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(api_call_id) = data.get("apiCallId").and_then(Value::as_str) else {
+                continue;
+            };
+            events.messages.push(CliEventMessage {
+                line: line_number,
+                timestamp_ms,
+                model: model.to_owned(),
+                is_subagent: object
+                    .get("agentId")
+                    .and_then(Value::as_str)
+                    .is_some_and(|agent| !agent.is_empty()),
+                api_call_id: api_call_id.to_owned(),
+            });
+        } else if event_type == Some("session.shutdown") {
+            let Some(model_metrics) = data
+                .and_then(|data| data.get("modelMetrics"))
+                .and_then(Value::as_object)
+            else {
+                continue;
+            };
+            for (model, metrics) in model_metrics {
+                let Some(credits) = metrics
+                    .get("requests")
+                    .and_then(|requests| requests.get("cost"))
+                    .and_then(value_as_f64)
+                else {
+                    continue;
+                };
+                if credits > 0.0 {
+                    events.shutdown_metrics.push(CliShutdownMetric {
+                        line: line_number,
+                        timestamp_ms,
+                        model: model.clone(),
+                        credits,
+                    });
+                }
+            }
+        }
+    }
+    Some(events)
+}
+
+fn read_cli_workspace_metadata(session_dir: &Path) -> CliWorkspaceMetadata {
+    let Ok(workspace) = fs::read_to_string(session_dir.join("workspace.yaml")) else {
+        return CliWorkspaceMetadata::default();
+    };
+    let mut name = None;
+    let mut cwd = None;
+    for line in workspace.lines().filter(|line| !line.starts_with(char::is_whitespace)) {
+        if let Some(value) = line.strip_prefix("name:").and_then(cli_yaml_scalar) {
+            name = Some(value);
+        } else if let Some(value) = line.strip_prefix("cwd:").and_then(cli_yaml_scalar) {
+            cwd = Some(value);
+        }
+    }
+    CliWorkspaceMetadata {
+        title: name.as_deref().and_then(|name| normalized_cli_title(Some(name))),
+        project: cwd.as_deref().and_then(project_name_from_cli_path),
+    }
+}
+
+fn cli_yaml_scalar(raw: &str) -> Option<String> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return None;
+    }
+    if value.starts_with('"') && value.ends_with('"') {
+        return serde_json::from_str::<String>(value).ok();
+    }
+    let value = value
+        .strip_prefix('\'')
+        .and_then(|value| value.strip_suffix('\''))
+        .unwrap_or(value)
+        .replace("''", "'");
+    (!value.is_empty()).then_some(value)
+}
+
+fn match_cli_event_message(
+    sessions: &mut HashMap<String, CliSessionEvents>,
+    session_id: &str,
+    timestamp_ms: i64,
+    model: &str,
+    is_subagent: bool,
+) -> Option<(PathBuf, usize, i64)> {
+    const MAX_TIMESTAMP_DELTA_MS: i64 = 1_000;
+    let events = sessions.get_mut(session_id)?;
+    let find_nearest = |require_agent_match: bool, events: &CliSessionEvents| {
+        events
+            .messages
+            .iter()
+            .enumerate()
+            .filter(|(_, message)| {
+                message.model == model
+                    && !events.used_api_calls.contains(&message.api_call_id)
+                    && (!require_agent_match || message.is_subagent == is_subagent)
+            })
+            .min_by_key(|(_, message)| message.timestamp_ms.abs_diff(timestamp_ms))
+            .map(|(index, message)| (index, message.timestamp_ms.abs_diff(timestamp_ms)))
+    };
+    let (index, delta) = find_nearest(true, events).or_else(|| find_nearest(false, events))?;
+    if delta > u64::try_from(MAX_TIMESTAMP_DELTA_MS).ok()? {
+        return None;
+    }
+    let message = &events.messages[index];
+    events.used_api_calls.insert(message.api_call_id.clone());
+    Some((events.path.clone(), message.line, message.timestamp_ms))
+}
+
+fn append_legacy_cli_shutdown_records(
+    result: &mut FileScanResult,
+    session_events: &HashMap<String, CliSessionEvents>,
+    sessions_with_database_usage: &HashSet<String>,
+    cutoff_ms: Option<i64>,
+) {
+    for (session_id, events) in session_events {
+        if sessions_with_database_usage.contains(session_id) {
+            continue;
+        }
+        for metric in &events.shutdown_metrics {
+            if cutoff_ms.is_some_and(|cutoff| metric.timestamp_ms < cutoff) {
+                continue;
+            }
+            result.json_candidate_lines += 1;
+            result.records.push(UsageRecord {
+                source: "copilot.cli.events".to_owned(),
+                hostname: String::new(),
+                timestamp_ms: Some(metric.timestamp_ms),
+                local_time_hint: format_local_time(metric.timestamp_ms),
+                chat_title: events.title.clone(),
+                model: metric.model.clone(),
+                model_id: Some(metric.model.clone()),
+                credits: metric.credits,
+                details: format!(
+                    "Copilot CLI {} (legacy session shutdown) • {} credits",
+                    metric.model, metric.credits
+                ),
+                session_id: Some(session_id.clone()),
+                request_id: None,
+                response_id: None,
+                agent_id: None,
+                project: events.project.clone(),
+                duration_ms: None,
+                turn_index: None,
+                session_total: None,
+                file: events.path.to_string_lossy().into_owned(),
+                line: metric.line,
+            });
+        }
+    }
+}
+
+fn system_time_to_unix_ms(time: &std::time::SystemTime) -> Option<i64> {
+    let millis = time.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis();
+    i64::try_from(millis).ok()
+}
+
+fn project_name_from_cli_path(path: &str) -> Option<String> {
+    path.trim()
+        .trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .find(|part| !part.trim().is_empty())
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn normalized_cli_title(value: Option<&str>) -> Option<String> {
+    let value = value?.lines().find(|line| !line.trim().is_empty())?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    const MAX_CHARS: usize = 120;
+    let mut title: String = value.chars().take(MAX_CHARS).collect();
+    if value.chars().count() > MAX_CHARS {
+        title.push('…');
+    }
+    Some(title)
+}
+
 fn has_component(path: &Path, wanted: &str) -> bool {
     path.components().any(|component| {
         component
@@ -995,12 +1523,27 @@ fn scan_file(path: &Path, project_map: &HashMap<PathBuf, String>) -> FileScanRes
         "copilot.cli.probe"
     };
 
+    let cli_workspace = (source == "copilot.cli.probe")
+        .then(|| path.parent())
+        .flatten()
+        .map(read_cli_workspace_metadata)
+        .unwrap_or_default();
     let project = workspace_dir_for_session(path)
-        .and_then(|dir| project_map.get(&dir).cloned());
+        .and_then(|dir| project_map.get(&dir).cloned())
+        .or(cli_workspace.project);
+    let cli_session_id = (source == "copilot.cli.probe")
+        .then(|| cli_session_id_from_event_path(path))
+        .flatten();
 
     let mut reader = BufReader::with_capacity(1024 * 1024, file);
-    let mut custom_title: Option<String> = None;
+    let mut custom_title = cli_workspace.title;
     let mut weak_title: Option<String> = None;
+    // VS Code chatSessions JSONL is a state-change log, not an append-only
+    // event ledger. The same request result can be persisted repeatedly as
+    // later mutations overwrite `requests[index].result`. Keep one logical
+    // usage record per stable response identity and update it to the latest
+    // persisted state instead of charging every physical JSONL line.
+    let mut vscode_response_records: HashMap<String, usize> = HashMap::new();
     let mut line_index = 0usize;
     let mut line = Vec::with_capacity(16 * 1024);
 
@@ -1024,7 +1567,12 @@ fn scan_file(path: &Path, project_map: &HashMap<PathBuf, String>) -> FileScanRes
         // Scan the header window for it and only fall back to a plain `title`
         // when no customTitle exists anywhere, so an early JSON-schema title
         // (e.g. the model's "Thinking Effort" label) can never win.
-        if custom_title.is_none() && line_index <= 64 {
+        if custom_title.is_none()
+            && source == "copilot.cli.probe"
+            && let Some(title) = extract_cli_user_title_from_line(&line)
+        {
+            custom_title = Some(title);
+        } else if custom_title.is_none() && line_index <= 64 {
             if let Some(title) = extract_custom_title_from_line(&line) {
                 custom_title = Some(title);
             } else if weak_title.is_none() {
@@ -1047,7 +1595,7 @@ fn scan_file(path: &Path, project_map: &HashMap<PathBuf, String>) -> FileScanRes
                 for raw in extraction.records {
                     let local =
                         enrich_from_response_metadata(raw.context, &extraction.response_metadata);
-                    result.records.push(UsageRecord {
+                    let record = UsageRecord {
                         source: source.to_owned(),
                         hostname: String::new(),
                         timestamp_ms: local.timestamp_ms,
@@ -1057,7 +1605,7 @@ fn scan_file(path: &Path, project_map: &HashMap<PathBuf, String>) -> FileScanRes
                         model_id: local.model_id.as_deref().map(display_model_id),
                         credits: raw.credits,
                         details: raw.details,
-                        session_id: local.session_id.clone(),
+                        session_id: local.session_id.clone().or_else(|| cli_session_id.clone()),
                         request_id: local.request_id.clone(),
                         response_id: local.response_id.clone(),
                         agent_id: local.agent_id.clone(),
@@ -1067,7 +1615,8 @@ fn scan_file(path: &Path, project_map: &HashMap<PathBuf, String>) -> FileScanRes
                         session_total: None,
                         file: path.to_string_lossy().into_owned(),
                         line: line_index,
-                    });
+                    };
+                    store_scanned_record(&mut result.records, &mut vscode_response_records, record);
                 }
             }
             Err(_) => {
@@ -1086,6 +1635,45 @@ fn scan_file(path: &Path, project_map: &HashMap<PathBuf, String>) -> FileScanRes
     }
 
     result
+}
+
+fn store_scanned_record(
+    records: &mut Vec<UsageRecord>,
+    vscode_response_records: &mut HashMap<String, usize>,
+    record: UsageRecord,
+) {
+    if record.source == "vscode.chatSessions"
+        && let Some(response_id) = record.response_id.clone()
+    {
+        if let Some(index) = vscode_response_records.get(&response_id).copied() {
+            records[index] = record;
+        } else {
+            vscode_response_records.insert(response_id, records.len());
+            records.push(record);
+        }
+    } else {
+        records.push(record);
+    }
+}
+
+fn cli_session_id_from_event_path(path: &Path) -> Option<String> {
+    if !path
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("events.jsonl"))
+    {
+        return None;
+    }
+    let session_dir = path.parent()?;
+    let session_root = session_dir.parent()?;
+    if !session_root
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("session-state"))
+    {
+        return None;
+    }
+    session_dir
+        .file_name()
+        .map(|session_id| session_id.to_string_lossy().into_owned())
 }
 
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
@@ -1277,12 +1865,22 @@ fn percent_decode(input: &str) -> String {
 /// each `(hostname, session_id)` group, which both the scan and merge sorts
 /// guarantee.
 fn assign_turn_indices(records: &mut [UsageRecord]) {
-    let mut totals: HashMap<(String, String), u32> = HashMap::new();
+    // SQLite-backed CLI records already carry their real, user-facing turn.
+    // Preserve those values; only synthesize sequential positions for legacy
+    // VS Code/CLI records where no turn was recorded at all.
+    let mut explicit_totals: HashMap<(String, String), u32> = HashMap::new();
+    let mut implicit_totals: HashMap<(String, String), u32> = HashMap::new();
     for record in records.iter() {
         if let Some(session) = record.session_id.as_ref() {
-            *totals
-                .entry((record.hostname.clone(), session.clone()))
-                .or_default() += 1;
+            let key = (record.hostname.clone(), session.clone());
+            if let Some(turn) = record.turn_index {
+                explicit_totals
+                    .entry(key)
+                    .and_modify(|total| *total = (*total).max(turn))
+                    .or_insert(turn);
+            } else {
+                *implicit_totals.entry(key).or_default() += 1;
+            }
         }
     }
     let mut seen: HashMap<(String, String), u32> = HashMap::new();
@@ -1293,10 +1891,14 @@ fn assign_turn_indices(records: &mut [UsageRecord]) {
             continue;
         };
         let key = (record.hostname.clone(), session);
+        if record.turn_index.is_some() {
+            record.session_total = explicit_totals.get(&key).copied();
+            continue;
+        }
         let counter = seen.entry(key.clone()).or_default();
         *counter += 1;
         record.turn_index = Some(*counter);
-        record.session_total = totals.get(&key).copied();
+        record.session_total = implicit_totals.get(&key).copied();
     }
 }
 
@@ -1604,6 +2206,27 @@ fn extract_custom_title_from_line(line: &[u8]) -> Option<String> {
     None
 }
 
+fn extract_cli_user_title_from_line(line: &[u8]) -> Option<String> {
+    if !contains_bytes(line, b"user.message") || !contains_bytes(line, b"content") {
+        return None;
+    }
+    let value = serde_json::from_slice::<Value>(line).ok()?;
+    let object = value.as_object()?;
+    if object.get("type").and_then(Value::as_str) != Some("user.message")
+        || object
+            .get("agentId")
+            .and_then(Value::as_str)
+            .is_some_and(|agent| !agent.is_empty())
+    {
+        return None;
+    }
+    let data = object.get("data")?.as_object()?;
+    if data.get("source").is_some_and(|source| !source.is_null()) {
+        return None;
+    }
+    normalized_cli_title(data.get("content").and_then(Value::as_str))
+}
+
 /// Extracts a plain `"title"` as a weak fallback, skipping JSON-schema lines
 /// (e.g. a model's `{"reasoningEffort":{"title":"Thinking Effort","enum":[…]}}`)
 /// whose `title` is a UI label, not the session title.
@@ -1706,10 +2329,28 @@ fn write_html(path: &Path, records: &[UsageRecord], primary_host: &str) -> Resul
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_line_extraction, extract_custom_title, parse_credit_details,
-        quick_extract_title_from_line, ContextFields, LineExtraction,
+        ContextFields, LineExtraction, UsageRecord, assign_turn_indices, collect_line_extraction,
+        extract_cli_user_title_from_line, extract_custom_title, normalized_cli_title, parse_credit_details,
+        project_name_from_cli_path, quick_extract_title_from_line, scan_cli_usage_connection, scan_file,
     };
+    use rusqlite::Connection;
     use serde_json::json;
+    use std::collections::HashMap;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn temporary_cli_root(test_name: &str) -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "gh-usage-{test_name}-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
 
     #[test]
     fn parses_credit_details_with_bullet_separator() {
@@ -1781,5 +2422,244 @@ mod tests {
             extraction.records[0].context.timestamp_ms,
             Some(1779101799403)
         );
+    }
+
+    #[test]
+    fn extracts_project_and_bounded_title_for_cli_sessions() {
+        assert_eq!(
+            project_name_from_cli_path(r"C:\work\gh-usage").as_deref(),
+            Some("gh-usage")
+        );
+        assert_eq!(
+            project_name_from_cli_path("/home/user/project/").as_deref(),
+            Some("project")
+        );
+        assert_eq!(
+            normalized_cli_title(Some("\n  Useful CLI session  \nsecond line")).as_deref(),
+            Some("Useful CLI session")
+        );
+    }
+
+    #[test]
+    fn aggregates_cli_usage_by_session_turn_and_model() {
+        let cli_root = temporary_cli_root("hybrid-cli");
+        let first_events = cli_root.join("session-state/session-1/events.jsonl");
+        let legacy_events = cli_root.join("session-state/session-legacy/events.jsonl");
+        fs::create_dir_all(first_events.parent().unwrap()).unwrap();
+        fs::create_dir_all(legacy_events.parent().unwrap()).unwrap();
+        fs::write(
+            &first_events,
+            concat!(
+                "{\"type\":\"user.message\",\"timestamp\":\"2026-08-01T00:00:09Z\",\"data\":{\"content\":\"Correct JSONL title\\nmore detail\"}}\n",
+                "{\"type\":\"assistant.message\",\"timestamp\":\"2026-08-01T00:00:10.008Z\",\"data\":{\"model\":\"gpt-test\",\"apiCallId\":\"api-1\"}}\n",
+                "{\"type\":\"assistant.message\",\"timestamp\":\"2026-08-01T00:00:12.010Z\",\"data\":{\"model\":\"gpt-test\",\"apiCallId\":\"api-2\"}}\n",
+                "{\"type\":\"assistant.message\",\"timestamp\":\"2026-08-01T00:00:20.009Z\",\"data\":{\"model\":\"gpt-test\",\"apiCallId\":\"api-3\"}}\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            &legacy_events,
+            concat!(
+                "{\"type\":\"user.message\",\"timestamp\":\"2026-08-01T00:00:30Z\",\"data\":{\"content\":\"Legacy JSONL title\"}}\n",
+                "{\"type\":\"session.shutdown\",\"timestamp\":\"2026-08-01T00:01:00Z\",\"data\":{\"modelMetrics\":{\"gpt-legacy\":{\"requests\":{\"cost\":1}}}}}\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            first_events.parent().unwrap().join("workspace.yaml"),
+            "name: Correct CLI title property\ncwd: C:\\work\\jsonl-project\n",
+        )
+        .unwrap();
+        fs::write(
+            legacy_events.parent().unwrap().join("workspace.yaml"),
+            "name: Legacy CLI title property\ncwd: C:\\work\\legacy-jsonl-project\n",
+        )
+        .unwrap();
+
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE sessions (
+                    id TEXT PRIMARY KEY, cwd TEXT, repository TEXT, summary TEXT
+                 );
+                 CREATE TABLE turns (
+                    session_id TEXT, turn_index INTEGER, user_message TEXT
+                 );
+                 CREATE TABLE assistant_usage_events (
+                    id INTEGER PRIMARY KEY, session_id TEXT, turn_index INTEGER,
+                    model TEXT, total_nano_aiu INTEGER, duration_ms INTEGER,
+                    created_at TEXT, agent_id TEXT
+                 );
+                 INSERT INTO sessions VALUES
+                    ('session-1', 'C:\\work\\gh-usage', 'owner/gh-usage',
+                     'Wrong SQLite title'),
+                    ('session-legacy', 'C:\\work\\legacy-project', 'owner/legacy',
+                     'Wrong legacy SQLite title'),
+                    ('session-db-only', 'C:\\work\\db-only', 'owner/db-only',
+                     'Database-only record must be ignored');
+                 INSERT INTO turns VALUES ('session-1', 0, 'fallback title');
+                 INSERT INTO assistant_usage_events VALUES
+                    (1, 'session-1', 0, 'gpt-test', 1500000000, 2000,
+                     '2026-08-01T00:00:10Z', NULL),
+                    (2, 'session-1', 0, 'gpt-test', 2000000000, 1000,
+                     '2026-08-01T00:00:12Z', NULL),
+                    (3, 'session-1', 1, 'gpt-test', 500000000, 500,
+                     '2026-08-01T00:00:20Z', NULL),
+                    (4, 'session-db-only', 0, 'gpt-test', 9000000000, 500,
+                     '2026-08-01T00:00:30Z', NULL);",
+            )
+            .unwrap();
+
+        let result = scan_cli_usage_connection(
+            &connection,
+            &cli_root.join("session-store.db"),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(result.records.len(), 3);
+        let first = &result.records[0];
+        assert!((first.credits - 3.5).abs() < f64::EPSILON);
+        assert_eq!(first.turn_index, Some(1));
+        assert_eq!(first.session_total, Some(2));
+        assert_eq!(first.duration_ms, Some(4002));
+        assert_eq!(first.project.as_deref(), Some("jsonl-project"));
+        assert_eq!(
+            first.chat_title.as_deref(),
+            Some("Correct CLI title property")
+        );
+        assert!(first.details.contains("2 model calls"));
+        assert_eq!(first.source, "copilot.cli.events");
+        assert_eq!(PathBuf::from(&first.file), first_events);
+        assert_eq!(first.line, 2);
+
+        let legacy = result
+            .records
+            .iter()
+            .find(|record| record.session_id.as_deref() == Some("session-legacy"))
+            .unwrap();
+        assert_eq!(legacy.credits, 1.0);
+        assert_eq!(legacy.model, "gpt-legacy");
+        assert_eq!(legacy.project.as_deref(), Some("legacy-jsonl-project"));
+        assert_eq!(
+            legacy.chat_title.as_deref(),
+            Some("Legacy CLI title property")
+        );
+        assert_eq!(PathBuf::from(&legacy.file), legacy_events);
+        assert_eq!(legacy.line, 2);
+        assert!(result
+            .records
+            .iter()
+            .all(|record| record.session_id.as_deref() != Some("session-db-only")));
+
+        fs::remove_dir_all(cli_root).unwrap();
+    }
+
+    #[test]
+    fn extracts_only_real_root_cli_user_messages_as_titles() {
+        let root = br#"{"type":"user.message","data":{"content":"JSONL title"}}"#;
+        let sourced = br#"{"type":"user.message","data":{"source":"system","content":"Not a title"}}"#;
+        let subagent = br#"{"type":"user.message","agentId":"agent-1","data":{"content":"Not a title"}}"#;
+
+        assert_eq!(
+            extract_cli_user_title_from_line(root).as_deref(),
+            Some("JSONL title")
+        );
+        assert_eq!(extract_cli_user_title_from_line(sourced), None);
+        assert_eq!(extract_cli_user_title_from_line(subagent), None);
+    }
+
+    #[test]
+    fn scans_legacy_cli_jsonl_without_sqlite() {
+        let cli_root = temporary_cli_root("legacy-jsonl-only");
+        let events = cli_root.join("session-state/old-session/events.jsonl");
+        fs::create_dir_all(events.parent().unwrap()).unwrap();
+        fs::write(
+            &events,
+            concat!(
+                "{\"type\":\"user.message\",\"timestamp\":\"2026-08-01T00:00:00Z\",\"data\":{\"content\":\"Old JSONL title\"}}\n",
+                "{\"type\":\"session.shutdown\",\"timestamp\":\"2026-08-01T00:01:00Z\",\"data\":{\"modelMetrics\":{\"gpt-old\":{\"requests\":{\"cost\":2}}}}}\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            events.parent().unwrap().join("workspace.yaml"),
+            "name: Old CLI title property\ncwd: C:\\work\\old-project\n",
+        )
+        .unwrap();
+
+        let result = scan_file(&events, &HashMap::new());
+
+        assert_eq!(result.records.len(), 1);
+        let record = &result.records[0];
+        assert_eq!(record.session_id.as_deref(), Some("old-session"));
+        assert_eq!(record.chat_title.as_deref(), Some("Old CLI title property"));
+        assert_eq!(record.project.as_deref(), Some("old-project"));
+        assert_eq!(record.model, "gpt-old");
+        assert_eq!(record.credits, 2.0);
+        assert_eq!(record.file, events.to_string_lossy());
+        assert_eq!(record.line, 2);
+
+        fs::remove_dir_all(cli_root).unwrap();
+    }
+
+    #[test]
+    fn keeps_latest_vscode_result_for_each_response() {
+        let root = temporary_cli_root("vscode-result-rewrites");
+        let session = root.join("workspace/chatSessions/session.jsonl");
+        fs::create_dir_all(session.parent().unwrap()).unwrap();
+        fs::write(
+            &session,
+            concat!(
+                "{\"kind\":1,\"k\":[\"requests\",0,\"result\"],\"v\":{\"details\":\"GPT-Test • 12.5 credits\",\"metadata\":{\"sessionId\":\"session\",\"responseId\":\"response-1\",\"modelId\":\"copilot/gpt-test\"},\"completedAt\":1000}}\n",
+                "{\"kind\":1,\"k\":[\"requests\",1,\"result\"],\"v\":{\"details\":\"GPT-Test • 3 credits\",\"metadata\":{\"sessionId\":\"session\",\"responseId\":\"response-2\",\"modelId\":\"copilot/gpt-test\"},\"completedAt\":2000}}\n",
+                "{\"kind\":1,\"k\":[\"requests\",0,\"result\"],\"v\":{\"details\":\"GPT-Test • 12.5 credits\",\"metadata\":{\"sessionId\":\"session\",\"responseId\":\"response-1\",\"modelId\":\"copilot/gpt-test\"},\"completedAt\":1000}}\n"
+            ),
+        )
+        .unwrap();
+
+        let result = scan_file(&session, &HashMap::new());
+
+        assert_eq!(result.records.len(), 2);
+        let first = result
+            .records
+            .iter()
+            .find(|record| record.response_id.as_deref() == Some("response-1"))
+            .unwrap();
+        assert_eq!(first.credits, 12.5);
+        assert_eq!(first.line, 3);
+        assert_eq!(first.model_id.as_deref(), Some("gpt-test"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn preserves_explicit_cli_turn_indices() {
+        let mut records = vec![UsageRecord {
+            source: "copilot.cli.sessionStore".to_owned(),
+            hostname: "host".to_owned(),
+            timestamp_ms: Some(1),
+            local_time_hint: None,
+            chat_title: None,
+            model: "model".to_owned(),
+            model_id: None,
+            credits: 1.0,
+            details: String::new(),
+            session_id: Some("session".to_owned()),
+            request_id: None,
+            response_id: None,
+            agent_id: None,
+            project: None,
+            duration_ms: None,
+            turn_index: Some(3),
+            session_total: Some(3),
+            file: String::new(),
+            line: 1,
+        }];
+
+        assign_turn_indices(&mut records);
+
+        assert_eq!(records[0].turn_index, Some(3));
+        assert_eq!(records[0].session_total, Some(3));
     }
 }

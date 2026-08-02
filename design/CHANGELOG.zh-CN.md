@@ -8,6 +8,20 @@
 
 ---
 
+## [未发布]
+
+### 修复
+
+- **Copilot CLI 会话现在会出现在报告中。** 扫描器以每个会话的 `events.jsonl` 作为可追溯主记录，以 `workspace.yaml.name` 作为权威标题（缺失时回退首条真实用户消息），并由 `workspace.yaml.cwd` 提供项目；只有 SQLite 用量行成功匹配 JSONL 响应后，才用 `session-store.db` 补充精确的 nano-AIU credits、耗时和轮次字段。
+- **正在进行和旧版 CLI 会话都能覆盖。** 当前用量由 SQLite（包括实时 WAL）补充；用量表中完全不存在的旧会话，则从非零 `session.shutdown` 指标补漏，并按会话避免重复计费。
+- **CLI 来源可精确打开到对应事件。** 每条关联记录都指向真实的 `events.jsonl` 响应行，报告中的「打开」会在 VS Code 中跳到该行，而不是打开 SQLite 数据库。
+
+### 变更
+
+- **默认启用 Copilot CLI 扫描。** 普通执行 `gh-usage` 会自动合并 VS Code 与 CLI 用量；只有明确需要纯 VS Code 报告时才使用 `--no-cli-logs`。旧的 `--include-cli-logs` 参数仍保留兼容。
+
+---
+
 ## [1.2.2] — 2026-06-17
 
 一个补充修复，终于让自动化安装器不再卡住。
@@ -73,7 +87,8 @@
 
 ---
 
-[未发布]: https://github.com/kukisama/gh-usage/compare/v1.2.1...HEAD
+[未发布]: https://github.com/kukisama/gh-usage/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.2
 [1.2.1]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.1
 [1.2.0]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.0
 [1.1.0]: https://github.com/kukisama/gh-usage/releases/tag/v1.1.0

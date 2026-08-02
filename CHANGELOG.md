@@ -8,6 +8,20 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Copilot CLI sessions now appear in reports.** The scanner uses each session's `events.jsonl` as the traceable source record, `workspace.yaml.name` as the authoritative title (falling back to the first real user message), and `workspace.yaml.cwd` for the project. Only after a SQLite usage row matches a JSONL response does `session-store.db` enrich it with precise nano-AIU credits, duration, and turn metadata.
+- **Active and legacy CLI sessions are both covered.** Current usage is enriched from SQLite (including its live WAL); older sessions absent from the usage table are recovered from non-zero `session.shutdown` metrics without double counting.
+- **CLI sources open at the matching event.** Every correlated record points to its real `events.jsonl` response line, and the report's Open action launches that exact line in VS Code instead of opening the SQLite database.
+
+### Changed
+
+- **Copilot CLI scanning is enabled by default.** A normal `gh-usage` run now combines VS Code and CLI usage automatically. Use `--no-cli-logs` when you explicitly want a VS Code-only report. The old `--include-cli-logs` flag remains accepted for compatibility.
+
+---
+
 ## [1.2.2] — 2026-06-17
 
 A follow-up fix that finally stops automated installers from getting stuck.
@@ -73,7 +87,8 @@ The first stable release — fast, local, and to the point.
 
 ---
 
-[Unreleased]: https://github.com/kukisama/gh-usage/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/kukisama/gh-usage/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.2
 [1.2.1]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.1
 [1.2.0]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.0
 [1.1.0]: https://github.com/kukisama/gh-usage/releases/tag/v1.1.0

@@ -182,6 +182,21 @@
 
   /* ---- session / round badge ---- */
   .session-name { color: var(--text); }
+  #records-table th:nth-child(5),
+  #records-table td:nth-child(5) {
+    min-width: 13rem;
+    width: 20rem;
+    max-width: 20rem;
+  }
+  #records-table td:nth-child(5) .session-name {
+    display: inline-block;
+    max-width: 20rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.4;
+    vertical-align: top;
+  }
   .round-badge {
     display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 10px;
     font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap;
@@ -836,18 +851,29 @@
     if (!s.startsWith("/")) s = "/" + s; // C:/... -> /C:/...
     return "file://" + s.split("/").map(encodeURIComponent).join("/");
   }
+  function vscodeFileUrl(p, line) {
+    if (!p) return "";
+    let s = String(p).replace(/\\/g, "/");
+    if (!s.startsWith("/")) s = "/" + s;
+    const encoded = s.split("/")
+      .map(part => encodeURIComponent(part).replace(/%3A/gi, ":"))
+      .join("/");
+    const lineSuffix = (line != null && line > 0) ? `:${line}` : "";
+    return `vscode://file${encoded}${lineSuffix}`;
+  }
   function sourceCell(r) {
     const src = escapeHtml(r.source || "");
     const path = r.file || "";
     if (!path) return src;
     const lnTxt = (r.line != null && r.line > 0) ? `<span class="ln">:${r.line}</span>` : "";
     const copyVal = (r.line != null && r.line > 0) ? `${path}:${r.line}` : path;
+    const openUrl = (r.line != null && r.line > 0) ? vscodeFileUrl(path, r.line) : fileUrl(path);
     return `<span class="src-trigger">${src}<span class="info">ⓘ</span></span>
       <div class="path-pop">
         <div class="path-text">${escapeHtml(path)}${lnTxt}</div>
         <div class="pop-actions">
           <button class="copy-path" data-copy="${escapeHtml(copyVal)}">${escapeHtml(t("source.copy"))}</button>
-          <a href="${escapeHtml(fileUrl(path))}" target="_blank" rel="noopener">${escapeHtml(t("source.open"))}</a>
+          <a href="${escapeHtml(openUrl)}" target="_blank" rel="noopener">${escapeHtml(t("source.open"))}</a>
         </div>
       </div>`;
   }
