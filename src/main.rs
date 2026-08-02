@@ -269,7 +269,6 @@ fn main() -> Result<()> {
     let copilot_cli_root = cli.copilot_cli_root.or_else(default_copilot_cli_root);
     let cutoff = cli.since_days.map(cutoff_system_time);
 
-    let discover_started = Instant::now();
     let mut files = collect_vscode_chat_session_files(&vscode_root, cutoff.as_ref())?;
     let mut cli_database_result = None;
 
@@ -294,11 +293,8 @@ fn main() -> Result<()> {
     if let Some(max_files) = cli.max_files {
         files.truncate(max_files);
     }
-    let discover_ms = discover_started.elapsed().as_millis();
-
     let scanned_files = files.len() + usize::from(cli_database_result.is_some());
     let project_map = build_project_map(&files);
-    let scan_started = Instant::now();
     let mut file_results: Vec<FileScanResult> = files
         .par_iter()
         .map(|path| scan_file(path, &project_map))
@@ -306,9 +302,6 @@ fn main() -> Result<()> {
     if let Some(result) = cli_database_result {
         file_results.push(result);
     }
-    let scan_ms = scan_started.elapsed().as_millis();
-
-    let reduce_started = Instant::now();
     let mut stats = ScanStats {
         scanned_files,
         ..ScanStats::default()
@@ -339,9 +332,7 @@ fn main() -> Result<()> {
         record.hostname = hostname.clone();
     }
     assign_turn_indices(&mut records);
-    let reduce_ms = reduce_started.elapsed().as_millis();
 
-    let write_started = Instant::now();
     match cli.format {
         OutputFormat::Csv => write_csv(&output_path, &records, !cli.no_bom)?,
         OutputFormat::Json => write_json(&output_path, &records, !cli.no_bom)?,
@@ -349,7 +340,6 @@ fn main() -> Result<()> {
     if let Some(html_path) = html_path.as_ref() {
         write_html(html_path, &records, &hostname)?;
     }
-    let write_ms = write_started.elapsed().as_millis();
     let total_ms = total_started.elapsed().as_millis();
 
     if no_args || cli.summary {
@@ -358,10 +348,6 @@ fn main() -> Result<()> {
             html_path.as_deref(),
             &records,
             &stats,
-            discover_ms,
-            scan_ms,
-            reduce_ms,
-            write_ms,
             total_ms,
         );
         if output_path.as_os_str() == "-" {
@@ -766,10 +752,6 @@ fn build_summary_report(
     html: Option<&Path>,
     records: &[UsageRecord],
     stats: &ScanStats,
-    _discover_ms: u128,
-    _scan_ms: u128,
-    _reduce_ms: u128,
-    _write_ms: u128,
     total_ms: u128,
 ) -> String {
     let total_credits = normalize_zero(records.iter().map(|record| record.credits).sum());
@@ -1575,10 +1557,10 @@ fn scan_file(path: &Path, project_map: &HashMap<PathBuf, String>) -> FileScanRes
         } else if custom_title.is_none() && line_index <= 64 {
             if let Some(title) = extract_custom_title_from_line(&line) {
                 custom_title = Some(title);
-            } else if weak_title.is_none() {
-                if let Some(title) = extract_weak_title_from_line(&line) {
-                    weak_title = Some(title);
-                }
+            } else if weak_title.is_none()
+                && let Some(title) = extract_weak_title_from_line(&line)
+            {
+                weak_title = Some(title);
             }
         }
 
@@ -1709,15 +1691,15 @@ fn collect_line_extraction(value: &Value, context: ContextFields, extraction: &m
                 merge_context_missing(entry, &local);
             }
 
-            if let Some(details) = map.get("details").and_then(Value::as_str) {
-                if let Some((model, credits)) = parse_credit_details(details) {
-                    extraction.records.push(RawUsageRecord {
-                        context: local.clone(),
-                        model,
-                        credits,
-                        details: details.to_owned(),
-                    });
-                }
+            if let Some(details) = map.get("details").and_then(Value::as_str)
+                && let Some((model, credits)) = parse_credit_details(details)
+            {
+                extraction.records.push(RawUsageRecord {
+                    context: local.clone(),
+                    model,
+                    credits,
+                    details: details.to_owned(),
+                });
             }
 
             collect_cli_shutdown_metrics(map, &local, extraction);
@@ -1824,7 +1806,7 @@ fn project_name_from_uri(uri: &str, is_workspace_file: bool) -> Option<String> {
     let decoded = percent_decode(without_scheme);
     let trimmed = decoded.trim_end_matches(['/', '\\']);
     let last = trimmed
-        .rsplit(|ch| ch == '/' || ch == '\\')
+        .rsplit(['/', '\\'])
         .find(|segment| !segment.is_empty())?;
     let name = if is_workspace_file {
         last.strip_suffix(".code-workspace").unwrap_or(last)
@@ -1917,10 +1899,10 @@ fn merge_context_from_object(context: &mut ContextFields, map: &serde_json::Map<
         });
     }
 
-    if let Some(Value::Object(model_state)) = map.get("modelState") {
-        if let Some(completed_at) = model_state.get("completedAt").and_then(Value::as_i64) {
-            context.timestamp_ms = Some(completed_at);
-        }
+    if let Some(Value::Object(model_state)) = map.get("modelState")
+        && let Some(completed_at) = model_state.get("completedAt").and_then(Value::as_i64)
+    {
+        context.timestamp_ms = Some(completed_at);
     }
 
     if let Some(completed_at) = map.get("completedAt").and_then(Value::as_i64) {
@@ -1929,14 +1911,12 @@ fn merge_context_from_object(context: &mut ContextFields, map: &serde_json::Map<
 
     // The chat-session `result` node carries wall-clock timing for the whole
     // exchange (request submitted -> response completed) under `timings`.
-    if context.total_elapsed_ms.is_none() {
-        if let Some(Value::Object(timings)) = map.get("timings") {
-            if let Some(elapsed) = timings.get("totalElapsed").and_then(Value::as_i64) {
-                if elapsed > 0 {
-                    context.total_elapsed_ms = Some(elapsed);
-                }
-            }
-        }
+    if context.total_elapsed_ms.is_none()
+        && let Some(Value::Object(timings)) = map.get("timings")
+        && let Some(elapsed) = timings.get("totalElapsed").and_then(Value::as_i64)
+        && elapsed > 0
+    {
+        context.total_elapsed_ms = Some(elapsed);
     }
 }
 
@@ -1947,10 +1927,10 @@ fn parse_rfc3339_timestamp_ms(timestamp: &str) -> Option<i64> {
 }
 
 fn assign_string(target: &mut Option<String>, map: &serde_json::Map<String, Value>, key: &str) {
-    if target.is_none() {
-        if let Some(value) = map.get(key).and_then(Value::as_str) {
-            *target = Some(value.to_owned());
-        }
+    if target.is_none()
+        && let Some(value) = map.get(key).and_then(Value::as_str)
+    {
+        *target = Some(value.to_owned());
     }
 }
 
@@ -2087,10 +2067,10 @@ fn enrich_from_response_metadata(
     mut local: ContextFields,
     response_metadata: &HashMap<String, ContextFields>,
 ) -> ContextFields {
-    if let Some(response_id) = local.response_id.as_ref() {
-        if let Some(metadata) = response_metadata.get(response_id) {
-            merge_context_missing(&mut local, metadata);
-        }
+    if let Some(response_id) = local.response_id.as_ref()
+        && let Some(metadata) = response_metadata.get(response_id)
+    {
+        merge_context_missing(&mut local, metadata);
     }
     local
 }
@@ -2176,12 +2156,12 @@ fn extract_json_string_after(line: &[u8], needle: &[u8]) -> Option<String> {
             break;
         }
         let literal = &line[literal_start..=cursor];
-        if let Ok(text) = std::str::from_utf8(literal) {
-            if let Ok(decoded) = serde_json::from_str::<String>(text) {
-                let trimmed = decoded.trim();
-                if !trimmed.is_empty() {
-                    return Some(trimmed.to_owned());
-                }
+        if let Ok(text) = std::str::from_utf8(literal)
+            && let Ok(decoded) = serde_json::from_str::<String>(text)
+        {
+            let trimmed = decoded.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_owned());
             }
         }
         search_from = cursor + 1;
@@ -2196,12 +2176,11 @@ fn extract_custom_title_from_line(line: &[u8]) -> Option<String> {
     if let Some(title) = extract_json_string_after(line, b"\"customTitle\":\"") {
         return Some(title);
     }
-    if contains_bytes(line, b"customTitle") {
-        if let Ok(value) = serde_json::from_slice::<Value>(line) {
-            if let Some(title) = extract_custom_title(&value) {
-                return Some(title);
-            }
-        }
+    if contains_bytes(line, b"customTitle")
+        && let Ok(value) = serde_json::from_slice::<Value>(line)
+        && let Some(title) = extract_custom_title(&value)
+    {
+        return Some(title);
     }
     None
 }
