@@ -10,6 +10,10 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Winget submission preflight is more reliable.** The release script now verifies GitHub CLI and WingetCreate tokens, detects organization authorization requirements only when GitHub reports them, safely opens validated GitHub authorization links, checks repository access, updates outdated tooling, and synchronizes a stale personal `winget-pkgs` fork before submission without force-resetting personal commits.
+
 ## [1.2.3] — 2026-08-06
 
 ### Added

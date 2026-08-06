@@ -18,20 +18,25 @@ For a version such as `1.0.0`, the script:
 
 1. Checks required command-line tools.
 2. Installs missing tools with `winget` when possible.
-3. Stops after installing any tools and asks you to restart the console.
-4. Requires the active shell to be PowerShell 7 before continuing.
-5. Normalizes the version to `1.0.0` and the release tag to `v1.0.0`.
-6. Reads the GitHub Release from `kukisama/gh-usage`.
-7. Finds these release assets:
+3. Before submission, checks that `wingetcreate` meets the known-good minimum version and upgrades it with `winget` when needed.
+4. Verifies GitHub CLI authentication and opens its secure browser login flow when needed.
+5. Verifies read access to the release repository and `microsoft/winget-pkgs`.
+6. Before submission, creates the authenticated account's `winget-pkgs` fork when missing and safely fast-forwards its `master` branch when it is behind.
+7. Verifies WingetCreate's separate GitHub OAuth cache and opens its login flow when needed.
+8. Stops after installing or upgrading a tool and asks you to restart the console.
+9. Requires the active shell to be PowerShell 7 before continuing.
+10. Normalizes the version to `1.0.0` and the release tag to `v1.0.0`.
+11. Reads the GitHub Release from `kukisama/gh-usage`.
+12. Finds these release assets:
    - `gh-usage-v1.0.0-windows-x64.zip`
    - `gh-usage-v1.0.0-checksums.txt`
-8. Downloads those assets into `target/winget/<version>/`.
-9. Reads the SHA256 checksum for the Windows zip.
-10. Verifies that the zip contains `gh-usage.exe` at the zip root.
-11. Generates the winget manifest files under:
+13. Downloads those assets into `target/winget/<version>/`.
+14. Reads the SHA256 checksum for the Windows zip.
+15. Verifies that the zip contains `gh-usage.exe` at the zip root.
+16. Generates the winget manifest files under:
    - `target/winget/<version>/manifests/k/Kukisama/gh-usage/<version>/`
-12. Optionally runs `winget validate`.
-13. Optionally runs `wingetcreate submit` to create a PR in `microsoft/winget-pkgs`.
+17. Optionally runs `winget validate`.
+18. Optionally runs `wingetcreate submit` to create a PR in `microsoft/winget-pkgs`.
 
 ## What the script does not do
 
@@ -42,9 +47,9 @@ The script does **not**:
 - Upload release assets.
 - Store secrets in this repository.
 - Print or write GitHub tokens.
-- Modify system files.
-- Modify source files outside its generated winget output directory.
+- Modify repository source files outside its generated winget output directory. It may install or upgrade the prerequisite tools listed below through `winget`.
 - Submit directly to the `gh-usage` repository.
+- Force-reset an `ahead` or `diverged` personal `winget-pkgs` fork.
 - Continue the release flow immediately after installing tools. It stops and asks you to restart the console first.
 
 ## Safety notes
@@ -53,13 +58,20 @@ The script is intended to be safe for normal release usage.
 
 Important details:
 
-- GitHub authentication is handled by the GitHub CLI (`gh`).
-- `wingetcreate` may prompt for GitHub login and may cache a token outside this repository.
+- There are two independent GitHub authentication caches: GitHub CLI (`gh`) reads the release, checks permissions, and maintains the fork; `wingetcreate` uses its own OAuth token to create the submission branch and PR.
+- If GitHub CLI is not authenticated, the script runs `gh auth login --web` and opens GitHub's secure browser flow.
+- During `-Submit`, the script runs `wingetcreate token --store`. It uses the cached token when valid, or opens WingetCreate's GitHub OAuth flow when authentication is missing.
+- If GitHub requires organization SAML SSO, the script recognizes the `X-GitHub-SSO` response header or an SSO URL printed by WingetCreate, validates that the URL uses `https://github.com`, and opens the authorization page. Complete authorization and rerun the script.
+- Users who are not subject to organization SSO see no additional prompt or browser page; SSO handling is failure-driven rather than an employee-specific mode.
 - The script itself does not contain a token, API key, password, or other secret.
 - Do not pass a GitHub token on the command line unless you fully understand the logging risk.
-- Prefer the interactive `wingetcreate` login flow when prompted.
+- Complete authentication only in the browser/device flow opened by the tools; never paste a token into this script.
+- Direct write access to `microsoft/winget-pkgs` is not required. Submission uses a writable personal fork plus permission to open a PR against the public upstream repository.
+- A missing personal fork is created automatically. A fork that is merely behind is fast-forwarded automatically without `--force`.
+- If the fork's `master` is `ahead` or `diverged`, the script stops instead of discarding personal commits. Restore that branch manually before retrying.
 - Missing tools are installed with `winget install --id <PackageId> --exact --source winget`.
-- If the script installs any tools, it exits on purpose. Restart the console before running it again so PATH updates and app execution aliases are available.
+- During `-Submit`, an older-than-supported `wingetcreate` is upgraded with `winget upgrade --id Microsoft.WingetCreate --exact --source winget`.
+- If the script installs or upgrades any tools, it exits on purpose. Restart the console before running it again so PATH updates and app execution aliases are available.
 - The only destructive local operation is cleaning the generated work directory for the selected version:
   - `target/winget/<version>/`
 - The script has a duplicate PR guard before submit. If an open PR already exists for the same package and version, it stops before calling `wingetcreate submit`.
@@ -74,6 +86,8 @@ The script checks these tools at startup:
 - Windows Package Manager Manifest Creator (`wingetcreate`)
 - Git (`git`)
 
+For submission, `wingetcreate` must be at least version `1.12.13.0` by default. This is a pinned, known-good minimum rather than a mandatory "latest version" check, so the release flow remains reproducible and does not fail merely because a newer release appears. Override `-MinimumWingetCreateVersion` only when the repository workflow has deliberately tested another minimum.
+
 If `winget` is available, the script installs missing tools with these package IDs:
 
 | Command | Package ID |
@@ -87,17 +101,17 @@ If `winget` itself is missing, install App Installer / Windows Package Manager f
 
 The script requires the active shell to be PowerShell 7. If it installs PowerShell 7, or if you are currently running Windows PowerShell instead of PowerShell 7, restart the console with `pwsh` and rerun the script.
 
-After the tools are available, check GitHub CLI authentication if needed:
+The script checks GitHub CLI authentication automatically. You can inspect it manually with:
 
 
 ```powershell
 gh auth status
 ```
 
-Authenticate if needed:
+If it is not authenticated, `-Submit` opens this web login automatically; you can also start it manually:
 
 ```powershell
-gh auth login
+gh auth login --hostname github.com --git-protocol https --web
 ```
 
 The target GitHub Release must already exist and include the expected Windows zip and checksum file.
@@ -163,7 +177,7 @@ Use this sequence for a normal winget release:
    .\scripts\publish-winget.ps1 -Version 1.0.0 -Submit
    ```
 
-6. Complete the `wingetcreate` login flow if prompted.
+6. Complete either browser login flow if prompted. GitHub CLI and WingetCreate intentionally maintain separate tokens.
 7. Open the PR URL printed by `wingetcreate`.
 8. Wait for validation and maintainer review.
 9. Respond only if `wingetbot` or maintainers request changes.
@@ -209,6 +223,7 @@ Do not use `-ForceSubmit` for normal submissions.
 | `-Repository` | `kukisama/gh-usage` | GitHub repository used to read the release and generate URLs. |
 | `-DefaultLocale` | `en-US` | Default manifest locale. |
 | `-ManifestVersion` | `1.10.0` | winget manifest schema version used in generated files. |
+| `-MinimumWingetCreateVersion` | `1.12.13.0` | Minimum known-good `wingetcreate` version required by `-Submit`; older versions are upgraded and the script asks you to restart. |
 | `-OutputRoot` | `./target/winget` | Root directory for generated winget files. |
 | `-Validate` | Off | Runs `winget validate` after generating manifests. |
 | `-Submit` | Off | Validates and submits the manifest with `wingetcreate submit`. |
@@ -271,11 +286,21 @@ If the script reports an existing open PR, do not submit again. Open the existin
 
 ### Authentication prompts
 
-`wingetcreate submit` may ask you to sign in to GitHub with a user code. Complete the browser login flow, then return to the terminal. This is expected.
+The script first validates GitHub CLI authentication and opens `gh auth login --web` when needed. Before submission it separately runs `wingetcreate token --store`; WingetCreate may ask you to sign in to GitHub with a user code. Complete either browser flow, then return to the terminal.
+
+GitHub CLI and WingetCreate use separate OAuth tokens, so an organization member may need to authorize each token separately for SAML SSO. When a failed GitHub request includes `X-GitHub-SSO: required; url=...`, or WingetCreate prints a GitHub organization/enterprise SSO URL, the script opens that URL and stops. Complete authorization and rerun the same command. External contributors whose accounts do not require organization SSO continue through the normal flow without seeing this step.
+
+### The personal winget fork is stale
+
+Before submission, the script compares `<authenticated-user>/winget-pkgs:master` with `microsoft/winget-pkgs:master`. It creates a missing fork and safely fast-forwards a behind fork. If the fork is ahead, diverged, unrelated, or not writable, submission stops with a targeted error; the script never uses `--force` because that could discard personal commits.
 
 ### A tool was installed but is still not detected
 
 This is usually a PATH or app execution alias refresh issue. Close the current terminal, open a new PowerShell 7 terminal, then rerun the script.
+
+### `wingetcreate` is older than the required version
+
+When `-Submit` is used, the script compares the installed version with its pinned known-good minimum. If it is too old, the script upgrades `Microsoft.WingetCreate` and stops intentionally. Close the current terminal, open a new PowerShell 7 terminal, and rerun the same submit command. Generating or validating manifests does not require this version check because those steps do not invoke `wingetcreate`.
 
 ## After submission
 
