@@ -148,6 +148,28 @@
     background: var(--bg); color: var(--text); border: 1px solid var(--border);
     padding: 5px 8px; border-radius: 6px; font: inherit; color-scheme: dark;
   }
+  .range-presets { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .range-btn {
+    background: var(--bg); color: var(--text-dim); border: 1px solid var(--border);
+    padding: 5px 6px; border-radius: 6px; font: inherit; font-size: 11px; cursor: pointer;
+  }
+  .range-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .range-btn.active { color: #0d1117; background: var(--accent); border-color: var(--accent); font-weight: 700; }
+
+  .billing-settings {
+    display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px;
+    font-size: 11px; color: var(--text-dim);
+  }
+  .billing-settings .toggle-row { display: flex; align-items: center; gap: 7px; color: var(--text); cursor: pointer; }
+  .billing-settings input[type=checkbox] { accent-color: var(--accent); }
+  .billing-settings label.control { display: flex; flex-direction: column; gap: 3px; }
+  .billing-settings select, .billing-settings input[type=number] {
+    width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    padding: 5px 8px; border-radius: 6px; font: inherit; color-scheme: dark;
+  }
+  .billing-settings .formula { line-height: 1.45; }
+  .billing-settings .pricing-links { display: flex; flex-direction: column; gap: 4px; }
+  .billing-settings label.control.hidden { display: none; }
 
   /* ---- active filter chips (PowerBI-style breadcrumb) ---- */
   .filter-bar {
@@ -356,13 +378,47 @@
 
     <h2 data-i18n="aside.dateRange">Date range</h2>
     <div class="date-slicer">
-      <label data-i18n="slicer.from">From
+      <div class="range-presets" id="date-presets">
+        <button class="range-btn active" type="button" data-range="all" data-i18n="range.all">All</button>
+        <button class="range-btn" type="button" data-range="7d" data-i18n="range.last7">Last 7 days</button>
+        <button class="range-btn" type="button" data-range="30d" data-i18n="range.last30">Last 30 days</button>
+        <button class="range-btn" type="button" data-range="3m" data-i18n="range.last3m">Last 3 months</button>
+      </div>
+      <label><span data-i18n="slicer.from">From</span>
         <input type="date" id="date-from">
       </label>
-      <label data-i18n="slicer.to">To
+      <label><span data-i18n="slicer.to">To</span>
         <input type="date" id="date-to">
       </label>
       <div id="date-range" style="font-size:11px;color:var(--text-dim);">—</div>
+    </div>
+
+    <h2 data-i18n="aside.pricing">Billing estimate</h2>
+    <div class="billing-settings">
+      <label class="toggle-row">
+        <input type="checkbox" id="cost-toggle">
+        <span data-i18n="pricing.enable">Show estimated cost</span>
+      </label>
+      <label class="control">
+        <span data-i18n="pricing.currency">Display currency</span>
+        <select id="cost-currency" disabled>
+          <option value="USD">USD ($)</option>
+          <option value="CNY">CNY (¥)</option>
+        </select>
+      </label>
+      <label class="control hidden" id="cny-rate-row">
+        <span data-i18n="pricing.exchangeRate">USD → CNY rate (reference: 2026-08-06)</span>
+        <input type="number" id="cny-rate" min="0.01" max="100" step="0.01" value="6.75">
+      </label>
+      <div class="formula" id="pricing-formula"></div>
+      <div class="pricing-links">
+        <a href="https://github.com/settings/billing"
+          target="_blank" rel="noopener" data-i18n="pricing.githubDashboard">GitHub billing dashboard ↗</a>
+        <a href="https://docs.github.com/en/copilot/concepts/billing/usage-based-billing-for-individuals"
+          target="_blank" rel="noopener" data-i18n="pricing.github">GitHub AI credits documentation ↗</a>
+        <a href="https://www.usagepricing.com/blueprint/github-copilot"
+           target="_blank" rel="noopener" data-i18n="pricing.usagePricing">UsagePricing calculator ↗</a>
+      </div>
     </div>
   </aside>
 
@@ -370,7 +426,7 @@
     <div id="filter-bar" class="filter-bar"></div>
     <div class="kpi-row">
       <div class="kpi">
-        <div class="label" data-i18n="kpi.total">Total credits</div>
+        <div class="label" id="kpi-total-label" data-i18n="kpi.total">Total credits</div>
         <div class="value" id="kpi-total">0</div>
         <div class="delta" id="kpi-total-sub"></div>
       </div>
@@ -403,7 +459,7 @@
 
     <div class="grid-2" style="margin-bottom:18px;">
       <div class="card">
-        <h3 data-i18n="charts.daily">Daily credits (stacked by machine)</h3>
+        <h3 id="daily-chart-title" data-i18n="charts.daily">Daily credits (stacked by machine)</h3>
         <div id="daily-chart"></div>
         <div id="daily-legend" class="legend"></div>
       </div>
@@ -435,7 +491,7 @@
             <th class="num" data-i18n="cols.records">Records</th>
             <th class="num" data-i18n="cols.activeDays">Active days</th>
             <th data-i18n="cols.topModel">Top model</th>
-            <th class="num" data-i18n="cols.credits">Credits</th>
+            <th class="num" id="machine-usage-heading" data-i18n="cols.credits">Credits</th>
             <th class="num" data-i18n="cols.share">Share</th>
           </tr>
         </thead>
@@ -517,6 +573,24 @@
       "aside.machines": "Machines",
       "aside.all": "All",
       "aside.dateRange": "Date range",
+      "aside.pricing": "Billing estimate",
+      "range.all": "All",
+      "range.last7": "Last 7 days",
+      "range.last30": "Last 30 days",
+      "range.last3m": "Last 3 months",
+      "pricing.enable": "Show estimated cost",
+      "pricing.currency": "Display currency",
+      "pricing.exchangeRate": "USD → CNY rate (reference: 2026-08-06)",
+      "pricing.formulaCredits": "1 AI credit = $0.01 USD",
+      "pricing.formulaCny": "1 AI credit ≈ ¥{value} CNY",
+      "pricing.rateReference": "FX reference: {date}",
+      "pricing.githubDashboard": "GitHub billing dashboard ↗",
+      "pricing.github": "GitHub AI credits documentation ↗",
+      "pricing.usagePricing": "UsagePricing calculator ↗",
+      "pricing.estimatedCost": "Estimated cost ({unit})",
+      "pricing.dailyCost": "Daily estimated cost ({unit}, stacked by machine)",
+      "pricing.cost": "Est. cost ({unit})",
+      "pricing.estimateNote": "Estimate only; GitHub billing is authoritative.",
       "kpi.total": "Total credits",
       "kpi.activeDays": "Active days",
       "kpi.records": "Records",
@@ -611,6 +685,24 @@
       "aside.machines": "机器列表",
       "aside.all": "全部",
       "aside.dateRange": "日期范围",
+      "aside.pricing": "计费估算",
+      "range.all": "全部",
+      "range.last7": "近 7 天",
+      "range.last30": "近 30 天",
+      "range.last3m": "近 3 个月",
+      "pricing.enable": "显示预估费用",
+      "pricing.currency": "显示币种",
+      "pricing.exchangeRate": "美元 → 人民币汇率（参考：2026-08-06）",
+      "pricing.formulaCredits": "1 AI credit = 0.01 美元",
+      "pricing.formulaCny": "1 AI credit ≈ ¥{value} 人民币",
+      "pricing.rateReference": "汇率参考日期：{date}",
+      "pricing.githubDashboard": "GitHub 官方账单页面 ↗",
+      "pricing.github": "GitHub AI Credits 官方说明 ↗",
+      "pricing.usagePricing": "UsagePricing 计费计算器 ↗",
+      "pricing.estimatedCost": "预估费用（{unit}）",
+      "pricing.dailyCost": "每日预估费用（{unit}，按机器堆叠）",
+      "pricing.cost": "预估费用（{unit}）",
+      "pricing.estimateNote": "仅供估算，最终以 GitHub 账单为准。",
       "kpi.total": "总积分",
       "kpi.activeDays": "活跃天数",
       "kpi.records": "记录数",
@@ -738,6 +830,10 @@
     return a.localeCompare(b);
   });
   const PROJECT_COLOR = Object.fromEntries(PROJECTS.map((p, i) => [p, PALETTE[i % PALETTE.length]]));
+  const USD_PER_CREDIT = 0.01;
+  const RECORD_DAYS = Array.from(new Set(RECORDS.map(r => dayKey(r.timestamp_ms)).filter(Boolean))).sort();
+  const DATA_MIN_DAY = RECORD_DAYS[0] || "";
+  const DATA_MAX_DAY = RECORD_DAYS[RECORD_DAYS.length - 1] || "";
 
   // Friendly parent-session names from the chat title, so rows of the same
   // session read as one group (e.g. "开发设计m1到m5 · round 8/8"). Repeated
@@ -782,6 +878,11 @@
   let SELECTED_DAY = "";
   let DATE_FROM = "";
   let DATE_TO = "";
+  let DATE_PRESET = "all";
+  let COST_ENABLED = false;
+  let COST_CURRENCY = "USD";
+  const CNY_RATE_REFERENCE_DATE = "2026-08-06";
+  let CNY_PER_USD = 6.75;
   let FILTER_TEXT = "";
   let PRIVACY_ON = false;
   let PAGE_SIZE = 20;
@@ -797,7 +898,7 @@
     model:    { num: false, filter: true,  label: "cols.model",     get: r => r.model || "",                        text: r => r.model || "" },
     session:  { num: false, filter: true,  label: "cols.session",   get: r => sessionName(r),                       text: r => sessionName(r) },
     round:    { num: true,  filter: false, label: "cols.round",     get: r => (r.turn_index != null ? r.turn_index : -1), text: r => (r.turn_index != null ? String(r.turn_index) : "") },
-    credits:  { num: true,  filter: false, label: "cols.credits",   get: r => r.credits || 0,                       text: r => fmtNum(r.credits, 2) },
+    credits:  { num: true,  filter: false, label: "cols.credits",   get: r => r.credits || 0,                       text: r => fmtUsage(r.credits, 2) },
     duration: { num: true,  filter: false, label: "cols.duration",  get: r => r.duration_ms || 0,                   text: r => fmtDuration(r.duration_ms) },
   };
   let SORT_KEY = "time";
@@ -809,6 +910,44 @@
     if (n == null || isNaN(n)) return "—";
     const d = digits == null ? (Math.abs(n) >= 100 ? 1 : 2) : digits;
     return n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+  }
+  function displayUsage(credits) {
+    const value = Number(credits) || 0;
+    if (!COST_ENABLED) return value;
+    const usd = value * USD_PER_CREDIT;
+    return COST_CURRENCY === "CNY" ? usd * CNY_PER_USD : usd;
+  }
+  function fmtUsage(credits, digits) {
+    return fmtNum(displayUsage(credits), digits);
+  }
+  function usageUnit() {
+    if (!COST_ENABLED) return t("charts.credits");
+    return COST_CURRENCY === "CNY" ? "CNY ¥" : "USD $";
+  }
+  function parseDay(day) {
+    if (!day) return null;
+    const [y, m, d] = day.split("-").map(Number);
+    return new Date(y, m - 1, d, 12, 0, 0, 0);
+  }
+  function formatDay(date) {
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  }
+  function offsetDay(day, days) {
+    const date = parseDay(day);
+    if (!date) return "";
+    date.setDate(date.getDate() + days);
+    return formatDay(date);
+  }
+  function offsetMonth(day, months) {
+    const date = parseDay(day);
+    if (!date) return "";
+    const wantedDay = date.getDate();
+    date.setDate(1);
+    date.setMonth(date.getMonth() + months);
+    const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+    date.setDate(Math.min(wantedDay, lastDay));
+    return formatDay(date);
   }
   function dayKey(ms) {
     if (ms == null) return null;
@@ -890,11 +1029,9 @@
       if (skip !== "source" && SELECTED_SOURCE && r.source !== SELECTED_SOURCE) return false;
       if (skip !== "model" && SELECTED_MODEL && r.model !== SELECTED_MODEL) return false;
       const dk = dayKey(r.timestamp_ms);
-      if (skip !== "day") {
-        if (SELECTED_DAY && dk !== SELECTED_DAY) return false;
-        if (DATE_FROM && (!dk || dk < DATE_FROM)) return false;
-        if (DATE_TO && (!dk || dk > DATE_TO)) return false;
-      }
+      if (skip !== "daySelection" && SELECTED_DAY && dk !== SELECTED_DAY) return false;
+      if (DATE_FROM && (!dk || dk < DATE_FROM)) return false;
+      if (DATE_TO && (!dk || dk > DATE_TO)) return false;
       if (needle) {
         const hay = [r.model, r.chat_title, host, r.source, r.details, projectLabel(projectOf(r)), r.session_id]
           .filter(Boolean).join(" ").toLowerCase();
@@ -909,7 +1046,7 @@
     const totals = {};
     for (const r of RECORDS) {
       const h = r.hostname || "unknown-host";
-      totals[h] = (totals[h] || 0) + (r.credits || 0);
+      totals[h] = (totals[h] || 0) + displayUsage(r.credits);
     }
     const ul = document.getElementById("machine-list");
     ul.innerHTML = "";
@@ -946,7 +1083,7 @@
     const totals = {};
     for (const r of RECORDS) {
       const p = projectOf(r);
-      totals[p] = (totals[p] || 0) + (r.credits || 0);
+      totals[p] = (totals[p] || 0) + displayUsage(r.credits);
     }
     const ul = document.getElementById("project-list");
     ul.innerHTML = "";
@@ -1009,10 +1146,10 @@
       chip("day", `${t("filter.day")}: ${SELECTED_DAY}`, () => { SELECTED_DAY = ""; });
     }
     if (DATE_FROM) {
-      chip("from", `${t("filter.dateFrom")}: ${DATE_FROM}`, () => { DATE_FROM = ""; });
+      chip("from", `${t("filter.dateFrom")}: ${DATE_FROM}`, () => { DATE_FROM = ""; DATE_PRESET = "custom"; });
     }
     if (DATE_TO) {
-      chip("to", `${t("filter.dateTo")}: ${DATE_TO}`, () => { DATE_TO = ""; });
+      chip("to", `${t("filter.dateTo")}: ${DATE_TO}`, () => { DATE_TO = ""; DATE_PRESET = "custom"; });
     }
     if (FILTER_TEXT.trim()) {
       chip("search", `${t("filter.search")}: ${FILTER_TEXT.trim()}`, () => { FILTER_TEXT = ""; });
@@ -1054,12 +1191,59 @@
     HOSTS.forEach(h => SELECTED_HOSTS.add(h));
     PROJECTS.forEach(p => SELECTED_PROJECTS.add(p));
     SELECTED_MODEL = ""; SELECTED_SOURCE = ""; SELECTED_DAY = "";
-    DATE_FROM = ""; DATE_TO = ""; FILTER_TEXT = "";
+    DATE_FROM = ""; DATE_TO = ""; DATE_PRESET = "all"; FILTER_TEXT = "";
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
     set("filter", ""); set("date-from", ""); set("date-to", "");
     set("model-filter", ""); set("source-filter", "");
     CURRENT_PAGE = 1;
     renderAll();
+  }
+
+  function syncDatePresetButtons() {
+    document.querySelectorAll("#date-presets [data-range]").forEach(btn => {
+      btn.classList.toggle("active", btn.getAttribute("data-range") === DATE_PRESET);
+    });
+  }
+
+  function applyDatePreset(preset) {
+    DATE_PRESET = preset;
+    SELECTED_DAY = "";
+    DATE_TO = DATA_MAX_DAY;
+    if (preset === "7d") DATE_FROM = offsetDay(DATA_MAX_DAY, -6);
+    else if (preset === "30d") DATE_FROM = offsetDay(DATA_MAX_DAY, -29);
+    else if (preset === "3m") DATE_FROM = offsetMonth(DATA_MAX_DAY, -3);
+    else { DATE_PRESET = "all"; DATE_FROM = ""; DATE_TO = ""; }
+    const from = document.getElementById("date-from");
+    const to = document.getElementById("date-to");
+    if (from) from.value = DATE_FROM;
+    if (to) to.value = DATE_TO;
+    CURRENT_PAGE = 1;
+    renderAll();
+  }
+
+  function syncPricingControls() {
+    const currency = document.getElementById("cost-currency");
+    const rate = document.getElementById("cny-rate");
+    const rateRow = document.getElementById("cny-rate-row");
+    const formula = document.getElementById("pricing-formula");
+    currency.disabled = !COST_ENABLED;
+    currency.value = COST_CURRENCY;
+    rate.value = CNY_PER_USD.toFixed(2);
+    rate.disabled = !COST_ENABLED || COST_CURRENCY !== "CNY";
+    rateRow.classList.toggle("hidden", COST_CURRENCY !== "CNY");
+    const cnyPerCredit = USD_PER_CREDIT * CNY_PER_USD;
+    formula.textContent = COST_CURRENCY === "CNY"
+      ? `${t("pricing.formulaCny", { value: fmtNum(cnyPerCredit, 4) })} · ${t("pricing.rateReference", { date: CNY_RATE_REFERENCE_DATE })} · ${t("pricing.estimateNote")}`
+      : `${t("pricing.formulaCredits")} · ${t("pricing.estimateNote")}`;
+  }
+
+  function updateUsageLabels() {
+    document.getElementById("kpi-total-label").textContent = COST_ENABLED
+      ? t("pricing.estimatedCost", { unit: usageUnit() }) : t("kpi.total");
+    document.getElementById("daily-chart-title").textContent = COST_ENABLED
+      ? t("pricing.dailyCost", { unit: usageUnit() }) : t("charts.daily");
+    document.getElementById("machine-usage-heading").textContent = COST_ENABLED
+      ? t("pricing.cost", { unit: usageUnit() }) : t("cols.credits");
   }
 
   function renderSourceFilter() {
@@ -1080,7 +1264,7 @@
   }
 
   function renderKpis(records) {
-    const totalCredits = records.reduce((sum, r) => sum + (r.credits || 0), 0);
+    const totalCredits = records.reduce((sum, r) => sum + displayUsage(r.credits), 0);
     const days = new Set();
     let minDay = null, maxDay = null, lastTs = null;
     const dayTotals = {};
@@ -1091,7 +1275,7 @@
         if (!minDay || k < minDay) minDay = k;
         if (!maxDay || k > maxDay) maxDay = k;
         if (lastTs == null || r.timestamp_ms > lastTs) lastTs = r.timestamp_ms;
-        dayTotals[k] = (dayTotals[k] || 0) + (r.credits || 0);
+        dayTotals[k] = (dayTotals[k] || 0) + displayUsage(r.credits);
       }
     }
     const active = days.size;
@@ -1145,7 +1329,7 @@
       if (!k) continue;
       const h = r.hostname || "unknown-host";
       if (!byDay[k]) byDay[k] = {};
-      byDay[k][h] = (byDay[k][h] || 0) + (r.credits || 0);
+      byDay[k][h] = (byDay[k][h] || 0) + displayUsage(r.credits);
     }
     const days = Object.keys(byDay).sort();
     if (days.length === 0) {
@@ -1243,8 +1427,8 @@
     let total = 0;
     for (const r of records) {
       const m = r.model || "(unknown)";
-      totals[m] = (totals[m] || 0) + (r.credits || 0);
-      total += (r.credits || 0);
+      totals[m] = (totals[m] || 0) + displayUsage(r.credits);
+      total += displayUsage(r.credits);
     }
     const entries = Object.entries(totals).sort((a, b) => b[1] - a[1]);
     const TOP = 4;
@@ -1280,7 +1464,7 @@
         <circle r="${R}" fill="none" stroke="#21262d" stroke-width="${STROKE}"/>
         ${segs}
         <text text-anchor="middle" y="-4" fill="var(--text)" font-size="20" font-weight="700">${fmtNum(total, 1)}</text>
-        <text text-anchor="middle" y="16" fill="var(--text-dim)" font-size="11">${t("charts.credits")}</text>
+        <text text-anchor="middle" y="16" fill="var(--text-dim)" font-size="11">${escapeHtml(usageUnit())}</text>
       </g>
     </svg>`;
 
@@ -1310,7 +1494,7 @@
     const totals = {};
     for (const r of records) {
       const p = projectOf(r);
-      totals[p] = (totals[p] || 0) + (r.credits || 0);
+      totals[p] = (totals[p] || 0) + displayUsage(r.credits);
     }
     const entries = Object.entries(totals).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
     if (entries.length === 0) {
@@ -1365,7 +1549,7 @@
       const sid = r.session_id || "(none)";
       if (!sessions[sid]) sessions[sid] = { credits: 0, turns: 0, duration: 0, project: projectOf(r), total: r.session_total || 0 };
       const s = sessions[sid];
-      s.credits += (r.credits || 0);
+      s.credits += displayUsage(r.credits);
       s.turns += 1;
       if (r.duration_ms != null && r.duration_ms > 0) s.duration += r.duration_ms;
       if (r.session_total) s.total = Math.max(s.total, r.session_total);
@@ -1384,7 +1568,7 @@
         <th data-i18n="sessions.colProject">${t("sessions.colProject")}</th>
         <th class="num">${t("sessions.colTurns")}</th>
         <th class="num">${t("sessions.colTime")}</th>
-        <th class="num">${t("sessions.colCredits")}</th>
+        <th class="num">${COST_ENABLED ? t("pricing.cost", { unit: usageUnit() }) : t("sessions.colCredits")}</th>
       </tr></thead>
       <tbody>${rows.map(([sid, s]) => `<tr style="cursor:pointer" data-session="${escapeHtml(sid)}">
         <td><span class="session-name mask" title="${escapeHtml(sid)}">${escapeHtml(sessionNameById(sid))}</span></td>
@@ -1413,11 +1597,11 @@
       if (!stats[h]) stats[h] = { records: 0, credits: 0, days: new Set(), models: {} };
       const s = stats[h];
       s.records += 1;
-      s.credits += (r.credits || 0);
+      s.credits += displayUsage(r.credits);
       const k = dayKey(r.timestamp_ms);
       if (k) s.days.add(k);
       const m = r.model || "(unknown)";
-      s.models[m] = (s.models[m] || 0) + (r.credits || 0);
+      s.models[m] = (s.models[m] || 0) + displayUsage(r.credits);
     }
     const totalCredits = Object.values(stats).reduce((s, v) => s + v.credits, 0);
     const rows = Object.entries(stats).sort((a, b) => b[1].credits - a[1].credits);
@@ -1488,7 +1672,7 @@
         <td><span class="chip model">${escapeHtml(r.model || "")}</span></td>
         <td>${sessionCell}</td>
         <td>${roundCell}</td>
-        <td class="num">${fmtNum(r.credits, 2)}</td>
+        <td class="num">${fmtUsage(r.credits, 2)}</td>
         <td class="num dur">${fmtDuration(r.duration_ms)}</td>
         <td class="src-cell">${sourceCell(r)}</td>
       </tr>`;
@@ -1529,9 +1713,11 @@
       const funnel = col.filter
         ? `<button class="th-funnel ${funnelActive}" data-col="${key}" title="${escapeHtml(t("colfilter.title"))}" aria-label="filter">⏷</button>`
         : "";
+      const label = key === "credits" && COST_ENABLED
+        ? t("pricing.cost", { unit: usageUnit() }) : t(col.label);
       th.innerHTML = `<span class="th-inner">
           <span class="th-sort ${sorted ? "sorted" : ""}" data-col="${key}" title="${escapeHtml(t("colfilter.sortHint"))}">
-            ${escapeHtml(t(col.label))}<span class="arrow">${arrow}</span>
+            ${escapeHtml(label)}<span class="arrow">${arrow}</span>
           </span>${funnel}
         </span>`;
     });
@@ -1687,10 +1873,13 @@
   // ---------- main render ----------
   function renderAll() {
     const recs = filteredRecords();
+    syncDatePresetButtons();
+    syncPricingControls();
+    updateUsageLabels();
     renderFilterBar();
     syncSidebarChecks();
     renderKpis(recs);
-    renderDailyChart(filteredRecords("day"));
+    renderDailyChart(filteredRecords("daySelection"));
     renderModelChart(filteredRecords("model"));
     renderProjectChart(filteredRecords("project"));
     renderTopSessions(recs);
@@ -1730,12 +1919,14 @@
   });
   document.getElementById("date-from").addEventListener("change", e => {
     DATE_FROM = e.target.value || "";
+    DATE_PRESET = "custom";
     SELECTED_DAY = "";
     CURRENT_PAGE = 1;
     renderAll();
   });
   document.getElementById("date-to").addEventListener("change", e => {
     DATE_TO = e.target.value || "";
+    DATE_PRESET = "custom";
     SELECTED_DAY = "";
     CURRENT_PAGE = 1;
     renderAll();
@@ -1745,6 +1936,29 @@
     PAGE_SIZE = isNaN(n) ? 20 : n;
     CURRENT_PAGE = 1;
     renderRecordsTable(filteredRecords());
+  });
+  document.querySelectorAll("#date-presets [data-range]").forEach(btn => {
+    btn.addEventListener("click", () => applyDatePreset(btn.getAttribute("data-range")));
+  });
+  document.getElementById("cost-toggle").addEventListener("change", e => {
+    COST_ENABLED = !!e.target.checked;
+    try { localStorage.setItem("gh-usage.costEnabled", COST_ENABLED ? "1" : "0"); } catch (_) {}
+    renderAll();
+  });
+  document.getElementById("cost-currency").addEventListener("change", e => {
+    COST_CURRENCY = e.target.value === "CNY" ? "CNY" : "USD";
+    try { localStorage.setItem("gh-usage.costCurrency", COST_CURRENCY); } catch (_) {}
+    renderAll();
+  });
+  document.getElementById("cny-rate").addEventListener("change", e => {
+    const rate = Number(e.target.value);
+    if (Number.isFinite(rate) && rate > 0 && rate <= 100) CNY_PER_USD = rate;
+    else e.target.value = CNY_PER_USD.toFixed(2);
+    try {
+      localStorage.setItem("gh-usage.cnyPerUsd", String(CNY_PER_USD));
+      localStorage.setItem("gh-usage.cnyRateReference", CNY_RATE_REFERENCE_DATE);
+    } catch (_) {}
+    renderAll();
   });
 
   // privacy mask toggle
@@ -1867,7 +2081,25 @@
 
   // boot
   document.getElementById("generated-at").textContent = RAW && RAW.generatedAt ? RAW.generatedAt : "—";
+  for (const id of ["date-from", "date-to"]) {
+    const el = document.getElementById(id);
+    if (DATA_MIN_DAY) el.min = DATA_MIN_DAY;
+    if (DATA_MAX_DAY) el.max = DATA_MAX_DAY;
+  }
   renderSourceFilter();
+  try {
+    COST_ENABLED = localStorage.getItem("gh-usage.costEnabled") === "1";
+    COST_CURRENCY = localStorage.getItem("gh-usage.costCurrency") === "CNY" ? "CNY" : "USD";
+    const savedRate = Number(localStorage.getItem("gh-usage.cnyPerUsd"));
+    const savedRateReference = localStorage.getItem("gh-usage.cnyRateReference");
+    const isLegacyDefault = !savedRateReference && Math.abs(savedRate - 7.20) < 0.000001;
+    if (Number.isFinite(savedRate) && savedRate > 0 && savedRate <= 100 && !isLegacyDefault) {
+      CNY_PER_USD = savedRate;
+    }
+    localStorage.setItem("gh-usage.cnyPerUsd", String(CNY_PER_USD));
+    localStorage.setItem("gh-usage.cnyRateReference", CNY_RATE_REFERENCE_DATE);
+  } catch (_) {}
+  document.getElementById("cost-toggle").checked = COST_ENABLED;
   try { PRIVACY_ON = localStorage.getItem("gh-usage.privacy") === "1"; } catch (_) {}
   applyPrivacy();
 

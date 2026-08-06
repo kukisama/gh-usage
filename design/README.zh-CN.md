@@ -79,9 +79,13 @@
 
 ### 侧边栏筛选
 
-左侧可按机器、项目、日期范围勾选，报告实时联动，无需额外配置。
+左侧可按机器、项目、日期范围勾选，报告实时联动，无需额外配置。日期可快捷选择近 7 天、30 天、3 个月或全部（默认），也可以继续手工指定起止日期。
 
 ![侧边栏筛选](dashboard-sidebar.jpg)
+
+### 可选费用估算
+
+费用显示默认关闭。开启后，报告中的用量数字和图表可以从 AI credits 切换为预估美元或人民币。换算采用 GitHub 官方口径 **1 AI credit = 0.01 美元**；美元兑人民币默认汇率为 **6.75（参考日期：2026-08-06）**，并允许编辑以适应汇率变化。控件旁提供 GitHub 官方账单页面、[AI Credits 官方说明](https://docs.github.com/en/copilot/concepts/billing/usage-based-billing-for-individuals)和 [UsagePricing](https://www.usagepricing.com/blueprint/github-copilot) 的直达链接。
 
 ### 一键截图分享
 
@@ -176,6 +180,7 @@ gh-usage --merge .\shared\copilot-usage
 
 - 只扫描本机已有的文件，已删除的历史无法重建。
 - 没有额度明细的记录会被跳过。
+- 美元/人民币金额仅供本地估算；汇率可由用户调整，最终以 GitHub 官方账单为准。
 - Copilot CLI 以事件 JSONL 作为主要追溯记录；会话标题取 `workspace.yaml.name`（未命名时回退 JSONL 首条真实用户消息），项目取 `workspace.yaml.cwd`。仅当 SQLite 用量行成功匹配 JSONL 响应时，`session-store.db` 才补充精确 credits、耗时和轮次字段。
 - 默认使用当前系统标准的 VS Code 与 Copilot CLI 数据目录，也支持自定义路径。
 

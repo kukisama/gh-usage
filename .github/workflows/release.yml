@@ -220,20 +220,28 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $notes = @"
-          Release $env:RELEASE_TAG.
-
-          Assets:
-          - Windows executable package
-          - Linux executable package
-          - macOS executable package
-          - Source archive
-          - SHA256 checksums
-          "@
+          $releaseVersion = $env:RELEASE_TAG.TrimStart('v')
+          $changelog = Get-Content CHANGELOG.md -Raw
+          $escapedVersion = [regex]::Escape($releaseVersion)
+          $match = [regex]::Match(
+            $changelog,
+            "(?ms)^## \[$escapedVersion\][^\r\n]*\r?\n(?<body>.*?)(?=^## |\z)"
+          )
+          if (-not $match.Success) {
+            throw "Could not find release notes for $releaseVersion in CHANGELOG.md."
+          }
+          $notesPath = Join-Path $PWD 'release-notes.md'
+          [IO.File]::WriteAllText(
+            $notesPath,
+            $match.Groups['body'].Value.Trim() + [Environment]::NewLine,
+            [Text.UTF8Encoding]::new($false)
+          )
 
           gh release view $env:RELEASE_TAG *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $env:RELEASE_TAG --title $env:RELEASE_TAG --notes $notes
+            gh release create $env:RELEASE_TAG --title $env:RELEASE_TAG --notes-file $notesPath
+          } else {
+            gh release edit $env:RELEASE_TAG --title $env:RELEASE_TAG --notes-file $notesPath
           }
 
           gh release upload $env:RELEASE_TAG artifacts/*.zip artifacts/*.txt --clobber

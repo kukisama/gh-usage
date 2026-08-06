@@ -10,8 +10,17 @@
 
 ## [未发布]
 
+## [1.2.3] — 2026-08-06
+
+### 新增
+
+- **可选美元/人民币费用估算。** 报告可按 GitHub 官方的 `1 credit = 0.01 美元` 换算，并允许编辑美元兑人民币汇率；默认值为 `6.75`，参考日期为 `2026-08-06`。费用显示默认关闭，同时提供 GitHub 账单、官方说明和 UsagePricing 的直达链接。
+- **快捷日期范围。** 可选择近 7 天、30 天、3 个月或全部（默认），同时保留自定义起止日期。
+
 ### 修复
 
+- **每日机器堆叠柱状图会跟随日期范围。** 快捷范围和自定义日期现在会与报告其他区域一起更新每日图表。
+- **VS Code 会话快照不再重复记账。** 扫描器会按稳定的响应 ID 只保留最新持久化状态，避免 JSONL 重写导致 credits 和轮次虚增；多机 CSV 合并时也会继续对相同记录去重。
 - **Copilot CLI 会话现在会出现在报告中。** 扫描器以每个会话的 `events.jsonl` 作为可追溯主记录，以 `workspace.yaml.name` 作为权威标题（缺失时回退首条真实用户消息），并由 `workspace.yaml.cwd` 提供项目；只有 SQLite 用量行成功匹配 JSONL 响应后，才用 `session-store.db` 补充精确的 nano-AIU credits、耗时和轮次字段。
 - **正在进行和旧版 CLI 会话都能覆盖。** 当前用量由 SQLite（包括实时 WAL）补充；用量表中完全不存在的旧会话，则从非零 `session.shutdown` 指标补漏，并按会话避免重复计费。
 - **CLI 来源可精确打开到对应事件。** 每条关联记录都指向真实的 `events.jsonl` 响应行，报告中的「打开」会在 VS Code 中跳到该行，而不是打开 SQLite 数据库。
@@ -87,7 +96,8 @@
 
 ---
 
-[未发布]: https://github.com/kukisama/gh-usage/compare/v1.2.2...HEAD
+[未发布]: https://github.com/kukisama/gh-usage/compare/v1.2.3...HEAD
+[1.2.3]: https://github.com/kukisama/gh-usage/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.2
 [1.2.1]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.1
 [1.2.0]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.0

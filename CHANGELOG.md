@@ -10,8 +10,17 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.3] — 2026-08-06
+
+### Added
+
+- **Optional USD/CNY cost estimates.** Reports can convert AI credits using GitHub's official `1 credit = $0.01 USD` rate and an editable USD→CNY rate, defaulting to `6.75` with a `2026-08-06` reference date. Cost display is off by default, with direct links to GitHub billing, official documentation, and UsagePricing.
+- **Quick date ranges.** Choose the last 7 days, 30 days, 3 months, or all data (the default) while retaining custom start/end dates.
+
 ### Fixed
 
+- **Daily machine bars now follow the selected date range.** Date shortcuts and custom dates update the stacked daily chart together with the rest of the report.
+- **Repeated VS Code session snapshots are no longer double-counted.** The scanner keeps the latest persisted state for each stable response ID, preventing append-style JSONL rewrites from inflating credits and turn counts; merged CSV reports continue to deduplicate matching records across machines.
 - **Copilot CLI sessions now appear in reports.** The scanner uses each session's `events.jsonl` as the traceable source record, `workspace.yaml.name` as the authoritative title (falling back to the first real user message), and `workspace.yaml.cwd` for the project. Only after a SQLite usage row matches a JSONL response does `session-store.db` enrich it with precise nano-AIU credits, duration, and turn metadata.
 - **Active and legacy CLI sessions are both covered.** Current usage is enriched from SQLite (including its live WAL); older sessions absent from the usage table are recovered from non-zero `session.shutdown` metrics without double counting.
 - **CLI sources open at the matching event.** Every correlated record points to its real `events.jsonl` response line, and the report's Open action launches that exact line in VS Code instead of opening the SQLite database.
@@ -87,7 +96,8 @@ The first stable release — fast, local, and to the point.
 
 ---
 
-[Unreleased]: https://github.com/kukisama/gh-usage/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/kukisama/gh-usage/compare/v1.2.3...HEAD
+[1.2.3]: https://github.com/kukisama/gh-usage/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.2
 [1.2.1]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.1
 [1.2.0]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.0

@@ -79,9 +79,13 @@ For Copilot CLI records, `events.jsonl` remains the traceable source while SQLit
 
 ### Sidebar filters
 
-Filter by machine, project, or date range from the left, and the report updates live — no setup required.
+Filter by machine, project, or date range from the left, and the report updates live — no setup required. Date shortcuts cover the last 7 days, 30 days, 3 months, or all data (the default), with custom start/end dates still available.
 
 ![Sidebar filters](design/dashboard-sidebar.jpg)
+
+### Optional cost estimates
+
+Cost display is off by default. Turn it on to switch usage values and charts from AI credits to estimated USD or CNY. The report uses GitHub's official rate of **1 AI credit = $0.01 USD**. The default USD→CNY rate is **6.75 (reference date: 2026-08-06)** and remains editable because currency rates change. Links to the GitHub billing dashboard, [official AI Credits documentation](https://docs.github.com/en/copilot/concepts/billing/usage-based-billing-for-individuals), and [UsagePricing](https://www.usagepricing.com/blueprint/github-copilot) are included beside the controls.
 
 ### One-click screenshot
 
@@ -176,6 +180,7 @@ Each row is one usage record. Common fields include machine name, local time, se
 
 - It only reads files that exist locally; deleted history can't be recovered.
 - Records without credit details are skipped.
+- USD/CNY values are estimates for local analysis. Exchange rates are user-configurable, and GitHub's billing page remains authoritative.
 - Copilot CLI event JSONL is the primary trace. The session title comes from `workspace.yaml.name` (or the first real JSONL user message when unnamed), and `workspace.yaml.cwd` identifies the project. `session-store.db` contributes exact credits, duration, and turn metadata only when its usage row matches a JSONL response.
 - It uses your system's standard VS Code and Copilot CLI data directories by default, and supports custom paths.
 
