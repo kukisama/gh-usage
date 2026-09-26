@@ -13,6 +13,7 @@ param(
     [string]$Repository = 'kukisama/gh-usage',
     [string]$DefaultLocale = 'en-US',
     [string]$ManifestVersion = '1.10.0',
+    [version]$MinimumWingetCreateVersion = '1.12.13.0',
     [string]$OutputRoot = '.\target\winget',
 
     [switch]$Validate,
@@ -21,6 +22,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$WingetRepository = 'microsoft/winget-pkgs'
+$WingetDefaultBranch = 'master'
 
 function Assert-Command {
     param(
@@ -56,6 +59,37 @@ function Install-WingetPackage {
     }
 }
 
+function Get-WingetCreateVersion {
+    $output = (& wingetcreate info 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Failed to read the installed wingetcreate version.'
+    }
+
+    $versionMatch = [regex]::Match($output, '(?m)^.*?\bv?(\d+\.\d+\.\d+(?:\.\d+)?)\b')
+    if (-not $versionMatch.Success) {
+        throw "Could not parse the installed wingetcreate version from: $($output.Trim())"
+    }
+
+    return [version]$versionMatch.Groups[1].Value
+}
+
+function Update-WingetCreate {
+    param([Parameter(Mandatory = $true)][version]$MinimumVersion)
+
+    Write-Host "Updating Windows Package Manager Manifest Creator (Microsoft.WingetCreate)..." -ForegroundColor Cyan
+    winget upgrade --id Microsoft.WingetCreate --exact --source winget --disable-interactivity --accept-source-agreements --accept-package-agreements
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Failed to update wingetcreate. Update it manually, restart the console, then rerun this script.'
+    }
+
+    $updatedVersion = Get-WingetCreateVersion
+    if ($updatedVersion -lt $MinimumVersion) {
+        throw "winget reported a successful update, but wingetcreate is still version $updatedVersion (minimum: $MinimumVersion). Restart the console and try again; if the version remains unchanged, update it manually."
+    }
+
+    throw 'Updated wingetcreate. Restart the console so the new executable and app execution alias are loaded, then rerun this script.'
+}
+
 function Initialize-Prerequisites {
     if (-not (Test-CommandAvailable 'winget')) {
         throw "winget was not found. Install App Installer / Windows Package Manager first, restart the console, then rerun this script."
@@ -84,6 +118,14 @@ function Initialize-Prerequisites {
     if ($PSVersionTable.PSEdition -ne 'Core' -or $PSVersionTable.PSVersion.Major -lt 7) {
         throw "PowerShell 7 is installed but this session is not running PowerShell 7. Restart the console with 'pwsh', then rerun this script."
     }
+
+    if ($Submit) {
+        $installedWingetCreateVersion = Get-WingetCreateVersion
+        Write-Host "wingetcreate version: $installedWingetCreateVersion (minimum: $MinimumWingetCreateVersion)" -ForegroundColor Cyan
+        if ($installedWingetCreateVersion -lt $MinimumWingetCreateVersion) {
+            Update-WingetCreate -MinimumVersion $MinimumWingetCreateVersion
+        }
+    }
 }
 
 function ConvertTo-ReleaseVersion {
@@ -106,6 +148,207 @@ function Get-JsonFromGh {
     }
 
     return $output | ConvertFrom-Json
+}
+
+function Get-GitHubSsoUrlFromText {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text)
+
+    $patterns = @(
+        '(?im)^X-GitHub-SSO:\s*required;[^\r\n]*?\burl=(?<url>https://github\.com/[^\s,]+)',
+        '(?i)(?<url>https://github\.com/(?:orgs|enterprises)/[^\s]+?/sso\?[^\s]+)'
+    )
+    foreach ($pattern in $patterns) {
+        $match = [regex]::Match($Text, $pattern)
+        if (-not $match.Success) {
+            continue
+        }
+
+        $candidate = $match.Groups['url'].Value.TrimEnd('.', ',', ';', ')', ']', '"', "'")
+        $uri = $null
+        if ([uri]::TryCreate($candidate, [System.UriKind]::Absolute, [ref]$uri) -and
+            $uri.Scheme -eq 'https' -and
+            $uri.Host -eq 'github.com') {
+            return $uri.AbsoluteUri
+        }
+    }
+
+    return $null
+}
+
+function Open-GitHubSsoAuthorization {
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$CredentialName
+    )
+
+    Write-Host "$CredentialName requires GitHub organization SSO authorization." -ForegroundColor Yellow
+    Write-Host "Authorization URL: $Url" -ForegroundColor Yellow
+    try {
+        Start-Process $Url
+        Write-Host "Opened the authorization page in your default browser." -ForegroundColor Yellow
+    }
+    catch {
+        Write-Host "Could not open the browser automatically. Open the URL above manually." -ForegroundColor Yellow
+    }
+}
+
+function Get-GitHubRepositoryMetadata {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositoryName,
+        [Parameter(Mandatory = $true)][string]$JsonFields
+    )
+
+    try {
+        return Get-JsonFromGh -Arguments @('repo', 'view', $RepositoryName, '--json', $JsonFields)
+    }
+    catch {
+        $originalError = $_
+        $headers = (& gh api --include --silent "repos/$RepositoryName" 2>&1 | Out-String)
+        $ssoUrl = Get-GitHubSsoUrlFromText -Text $headers
+        if ($ssoUrl) {
+            Open-GitHubSsoAuthorization -Url $ssoUrl -CredentialName 'GitHub CLI'
+            throw "GitHub CLI needs organization SSO authorization before it can access $RepositoryName. Complete authorization in the browser, then rerun the script."
+        }
+
+        throw $originalError
+    }
+}
+
+function Initialize-GitHubAuthentication {
+    Write-Host "Checking GitHub CLI authentication..." -ForegroundColor Cyan
+    & gh auth status *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "GitHub CLI is not authenticated. Opening the secure browser login flow..." -ForegroundColor Yellow
+        & gh auth login --hostname github.com --git-protocol https --web | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw 'GitHub CLI authentication failed. Complete the browser login and rerun the script.'
+        }
+
+        & gh auth status *> $null
+        if ($LASTEXITCODE -ne 0) {
+            throw 'GitHub CLI still reports no valid authentication after login.'
+        }
+    }
+
+    $login = (& gh api user --jq '.login' | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $login) {
+        throw 'Could not determine the authenticated GitHub account.'
+    }
+
+    Write-Host "Authenticated GitHub account: $login" -ForegroundColor Green
+    return $login
+}
+
+function Assert-GitHubRepositoryAccess {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceRepository,
+        [Parameter(Mandatory = $true)][string]$UpstreamRepository
+    )
+
+    Write-Host "Checking GitHub repository access..." -ForegroundColor Cyan
+    $source = Get-GitHubRepositoryMetadata -RepositoryName $SourceRepository -JsonFields 'nameWithOwner,viewerPermission'
+    $upstream = Get-GitHubRepositoryMetadata -RepositoryName $UpstreamRepository -JsonFields 'nameWithOwner,viewerPermission,defaultBranchRef'
+
+    $readPermissions = @('READ', 'TRIAGE', 'WRITE', 'MAINTAIN', 'ADMIN')
+    if ($source.viewerPermission -notin $readPermissions) {
+        throw "The authenticated GitHub account cannot read the release repository $SourceRepository."
+    }
+    if ($upstream.viewerPermission -notin $readPermissions) {
+        throw "The authenticated GitHub account cannot read $UpstreamRepository."
+    }
+    if ($upstream.defaultBranchRef.name -ne $WingetDefaultBranch) {
+        throw "$UpstreamRepository now uses '$($upstream.defaultBranchRef.name)' as its default branch; update this script before submitting."
+    }
+
+    Write-Host "Repository access OK: $SourceRepository ($($source.viewerPermission)); $UpstreamRepository ($($upstream.viewerPermission))" -ForegroundColor Green
+}
+
+function Get-GitHubRepositoryIfExists {
+    param(
+        [Parameter(Mandatory = $true)][string]$Owner,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    $query = 'query($owner:String!,$name:String!){repository(owner:$owner,name:$name){nameWithOwner,isFork,viewerPermission,defaultBranchRef{name},parent{name,owner{login}}}}'
+    $result = Get-JsonFromGh -Arguments @('api', 'graphql', '-f', "query=$query", '-F', "owner=$Owner", '-F', "name=$Name")
+    return $result.data.repository
+}
+
+function Sync-WingetFork {
+    param([Parameter(Mandatory = $true)][string]$GitHubLogin)
+
+    $forkRepository = "$GitHubLogin/winget-pkgs"
+    Write-Host "Checking winget fork $forkRepository..." -ForegroundColor Cyan
+    $fork = Get-GitHubRepositoryIfExists -Owner $GitHubLogin -Name 'winget-pkgs'
+    if ($null -eq $fork) {
+        Write-Host "No personal winget-pkgs fork exists. Creating one without changing this repository's Git remotes..." -ForegroundColor Yellow
+        & gh repo fork $WingetRepository --clone=false --remote=false --default-branch-only
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not create $forkRepository. Check GitHub permissions and rerun the script."
+        }
+        $fork = Get-GitHubRepositoryIfExists -Owner $GitHubLogin -Name 'winget-pkgs'
+        if ($null -eq $fork) {
+            throw "GitHub accepted the fork request, but $forkRepository is not ready yet. Wait briefly and rerun the script."
+        }
+    }
+
+    $parentRepository = if ($fork.parent) { "$($fork.parent.owner.login)/$($fork.parent.name)" } else { '' }
+    if (-not $fork.isFork -or $parentRepository -ne $WingetRepository) {
+        throw "$forkRepository exists but is not a fork of $WingetRepository. The script will not replace or modify an unrelated repository."
+    }
+    if ($fork.viewerPermission -notin @('WRITE', 'MAINTAIN', 'ADMIN')) {
+        throw "The authenticated GitHub account does not have write access to $forkRepository (permission: $($fork.viewerPermission))."
+    }
+    if ($fork.defaultBranchRef.name -ne $WingetDefaultBranch) {
+        throw "$forkRepository uses '$($fork.defaultBranchRef.name)' as its default branch instead of '$WingetDefaultBranch'. Fix the fork before submitting."
+    }
+
+    $compareEndpoint = "repos/$WingetRepository/compare/${WingetDefaultBranch}...${GitHubLogin}:${WingetDefaultBranch}"
+    $status = (& gh api $compareEndpoint --jq '.status' | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $status) {
+        throw "Could not compare $forkRepository with $WingetRepository."
+    }
+
+    switch ($status) {
+        'identical' {
+            Write-Host "Winget fork is already current." -ForegroundColor Green
+        }
+        'behind' {
+            Write-Host "Winget fork is behind upstream; syncing $WingetDefaultBranch..." -ForegroundColor Yellow
+            & gh repo sync $forkRepository --source $WingetRepository --branch $WingetDefaultBranch
+            if ($LASTEXITCODE -ne 0) {
+                throw "Could not fast-forward $forkRepository. The script deliberately avoids --force so personal commits are never discarded."
+            }
+
+            $status = (& gh api $compareEndpoint --jq '.status' | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0 -or $status -ne 'identical') {
+                throw "Fork synchronization completed but $forkRepository is still '$status' relative to upstream."
+            }
+            Write-Host "Winget fork synchronized successfully." -ForegroundColor Green
+        }
+        { $_ -in @('ahead', 'diverged') } {
+            throw "$forkRepository is '$status' relative to $WingetRepository. The script will not force-reset your fork because that could discard personal commits. Restore the fork's $WingetDefaultBranch manually, then rerun."
+        }
+        default {
+            throw "Unexpected GitHub comparison status '$status' for $forkRepository."
+        }
+    }
+}
+
+function Initialize-WingetCreateAuthentication {
+    Write-Host "Checking WingetCreate GitHub OAuth authentication..." -ForegroundColor Cyan
+    Write-Host "WingetCreate uses a separate cached token from GitHub CLI and may open a browser if authentication is required." -ForegroundColor DarkGray
+    & wingetcreate token --store
+    if ($LASTEXITCODE -ne 0) {
+        throw 'WingetCreate GitHub authentication failed. Complete its browser/device login, authorize Microsoft organization SSO if requested, and rerun the script.'
+    }
+}
+
+function Initialize-WingetSubmission {
+    param([Parameter(Mandatory = $true)][string]$GitHubLogin)
+
+    Sync-WingetFork -GitHubLogin $GitHubLogin
+    Initialize-WingetCreateAuthentication
 }
 
 function Write-Utf8NoBomFile {
@@ -302,10 +545,12 @@ Set-Location $repoRoot
 
 Initialize-Prerequisites
 
-Write-Host "Checking GitHub authentication..." -ForegroundColor Cyan
-& gh auth status *> $null
-if ($LASTEXITCODE -ne 0) {
-    throw 'GitHub CLI is not authenticated. Run: gh auth login'
+$githubLogin = Initialize-GitHubAuthentication
+Assert-GitHubRepositoryAccess -SourceRepository $Repository -UpstreamRepository $WingetRepository
+
+if ($Submit) {
+    Assert-NoExistingWingetPullRequest -PackageIdentifier $PackageIdentifier -PackageVersion $releaseVersion -Force:$ForceSubmit
+    Initialize-WingetSubmission -GitHubLogin $githubLogin
 }
 
 Write-Host "Reading GitHub release $releaseTag..." -ForegroundColor Cyan
@@ -349,10 +594,6 @@ Write-Host "InstallerUrl: $assetUrl"
 Write-Host "InstallerSha256: $installerSha256"
 Write-Host ""
 
-if ($Submit) {
-    Assert-NoExistingWingetPullRequest -PackageIdentifier $PackageIdentifier -PackageVersion $releaseVersion -Force:$ForceSubmit
-}
-
 if ($Validate -or $Submit) {
     Assert-Command -Name winget -InstallHint 'Install winget from https://learn.microsoft.com/windows/package-manager/winget/.'
 
@@ -367,10 +608,17 @@ if ($Submit) {
     Assert-Command -Name wingetcreate -InstallHint 'Install it with: winget install Microsoft.WingetCreate'
 
     Write-Host "Submitting manifest with wingetcreate..." -ForegroundColor Cyan
-    wingetcreate submit $manifestDir
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Hint: wingetcreate uses its own GitHub token. If the error mentions 'SAML enforcement', 'SSO', or links to /enterprises/.../sso?authorization_request=, you must authorize that token for the Microsoft organization." -ForegroundColor Yellow
-        Write-Host "      Open the SSO URL printed above in a browser, complete Microsoft SSO authorization, then rerun: .\scripts\publish-winget.ps1 -Version $releaseVersion -Submit" -ForegroundColor Yellow
+    $wingetCreateOutput = @()
+    & wingetcreate submit $manifestDir 2>&1 | Tee-Object -Variable wingetCreateOutput | Out-Host
+    $submitExitCode = $LASTEXITCODE
+    if ($submitExitCode -ne 0) {
+        $ssoUrl = Get-GitHubSsoUrlFromText -Text ($wingetCreateOutput | Out-String)
+        if ($ssoUrl) {
+            Open-GitHubSsoAuthorization -Url $ssoUrl -CredentialName 'WingetCreate'
+            Write-Host "Complete SSO authorization, then rerun: .\scripts\publish-winget.ps1 -Version $releaseVersion -Submit" -ForegroundColor Yellow
+        } else {
+            Write-Host "Hint: WingetCreate uses its own GitHub token. If GitHub requires organization SSO, authorize that OAuth token and rerun the command." -ForegroundColor Yellow
+        }
         throw 'wingetcreate submit failed.'
     }
 } else {

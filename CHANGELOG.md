@@ -26,6 +26,10 @@ More complete usage totals for large multi-agent tasks, with one-command report 
 
 - **Reports stop at user-turn granularity.** One row represents one user exchange with its recorded subtask usage included. CLI model aggregates sharing a turn are combined for display; legacy session-only totals are explicitly labelled as summaries. Tools, MCP calls, and subagents are not shown as separate billing rows.
 
+### Fixed
+
+- **Winget submission preflight is more reliable.** The release script now verifies GitHub CLI and WingetCreate tokens, detects organization authorization requirements only when GitHub reports them, safely opens validated GitHub authorization links, checks repository access, updates outdated tooling, and synchronizes a stale personal `winget-pkgs` fork before submission without force-resetting personal commits.
+
 ## [1.2.3] — 2026-08-06
 
 ### Added
