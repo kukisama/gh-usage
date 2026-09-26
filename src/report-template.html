@@ -91,6 +91,7 @@
     margin: 0 0 12px; font-size: 13px; text-transform: uppercase;
     letter-spacing: 0.06em; color: var(--text-dim); font-weight: 600;
   }
+  .usage-note { color: var(--text-dim); font-size: 12px; line-height: 1.6; margin: 0 0 14px; }
 
   table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   table th, table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--grid); }
@@ -500,7 +501,9 @@
     </div>
 
     <div class="card">
-      <h3 data-i18n="tables.records">Records</h3>
+      <h3 data-i18n="tables.records">Session turns</h3>
+      <p class="usage-note" data-i18n="usage.turnScope">One row per user exchange, not per tool or agent call. Credits include the turn's recorded subtask usage; child calls are not added again. Active turns may continue to grow.</p>
+      <p class="usage-note" data-i18n="usage.compatibility">New logs use cumulative credits, old logs use result details; overlapping totals are reconciled, never summed. Model labels describe the turn, not a separate subagent bill. Legacy session-only summaries remain summaries.</p>
       <div class="toolbar">
         <input id="filter" type="search"
                data-i18n-attr='{"placeholder":"toolbar.filter"}'
@@ -569,7 +572,7 @@
     en: {
       "app.title": "gh-usage report",
       "header.generated": "Generated",
-      "header.summary": "{machines} machine(s) · {records} record(s)",
+      "header.summary": "{machines} machine(s) · {records} turn/summary row(s)",
       "aside.machines": "Machines",
       "aside.all": "All",
       "aside.dateRange": "Date range",
@@ -593,7 +596,7 @@
       "pricing.estimateNote": "Estimate only; GitHub billing is authoritative.",
       "kpi.total": "Total credits",
       "kpi.activeDays": "Active days",
-      "kpi.records": "Records",
+      "kpi.records": "Recorded turns / summaries",
       "kpi.avgPerDay": "Avg / active day",
       "kpi.lastSeen": "last: {d}",
       "kpi.acrossMachines": "across {n} machine(s)",
@@ -604,12 +607,15 @@
       "charts.credits": "credits",
       "charts.others": "others",
       "tables.byMachine": "By machine",
-      "tables.records": "Records",
+      "tables.records": "Session turns",
+      "usage.turnScope": "One row per user exchange, not per tool, MCP or agent call. Credits include the turn's recorded subtask usage; child calls are not added again. Active turns may continue to grow.",
+      "usage.compatibility": "New logs use cumulative credits, old logs use result details; overlapping totals are reconciled, never summed. Model labels describe the turn, not a separate subagent bill. Billed turns removed by rewind/retry are retained as historical turns. Legacy session-only summaries remain summaries.",
       "cols.machine": "Machine",
-      "cols.records": "Records",
+      "cols.records": "Turns / summaries",
       "cols.activeDays": "Active days",
       "cols.topModel": "Top model",
       "cols.credits": "Credits",
+      "cols.turnCredits": "Turn credits (incl. subtasks)",
       "cols.share": "Share",
       "cols.timeLocal": "Time (local)",
       "cols.host": "Host",
@@ -662,6 +668,8 @@
       "session.turnOf": "turn {i} / {n}",
       "session.round": "round {i} / {n}",
       "session.roundOnly": "round {i}",
+      "session.summary": "Session summary",
+      "session.historical": "historical",
       "session.untitled": "(untitled session)",
       "source.copy": "Copy path",
       "source.open": "Open",
@@ -681,7 +689,7 @@
     zh: {
       "app.title": "gh-usage 使用报告",
       "header.generated": "生成于",
-      "header.summary": "{machines} 台机器 · {records} 条记录",
+      "header.summary": "{machines} 台机器 · {records} 条轮次/汇总记录",
       "aside.machines": "机器列表",
       "aside.all": "全部",
       "aside.dateRange": "日期范围",
@@ -705,7 +713,7 @@
       "pricing.estimateNote": "仅供估算，最终以 GitHub 账单为准。",
       "kpi.total": "总积分",
       "kpi.activeDays": "活跃天数",
-      "kpi.records": "记录数",
+      "kpi.records": "已记录轮次 / 汇总",
       "kpi.avgPerDay": "日均（活跃日）",
       "kpi.lastSeen": "最近：{d}",
       "kpi.acrossMachines": "覆盖 {n} 台机器",
@@ -716,12 +724,15 @@
       "charts.credits": "积分",
       "charts.others": "其他",
       "tables.byMachine": "按机器汇总",
-      "tables.records": "明细记录",
+      "tables.records": "会话轮次明细",
+      "usage.turnScope": "每行代表一次用户交流，不是一次工具、MCP 或 Agent 调用。本轮额度包含日志已记录的子任务用量，不再重复叠加或展开子任务明细。进行中的轮次仍可能继续增长。",
+      "usage.compatibility": "新日志读取累计额度，旧日志读取结果文案；两者并存时核对总额，绝不相加。模型列表示轮次模型，不是子代理逐模型账单。回退/重试移除的已计费交流保留为历史轮次。旧日志只有会话总额时标为汇总，不虚构轮次。",
       "cols.machine": "机器",
-      "cols.records": "记录数",
+      "cols.records": "轮次 / 汇总数",
       "cols.activeDays": "活跃天数",
       "cols.topModel": "主要模型",
       "cols.credits": "积分",
+      "cols.turnCredits": "本轮额度（含子任务）",
       "cols.share": "占比",
       "cols.timeLocal": "本地时间",
       "cols.host": "机器",
@@ -774,6 +785,8 @@
       "session.turnOf": "第 {i} / {n} 次",
       "session.round": "第 {i}/{n} 轮",
       "session.roundOnly": "第 {i} 轮",
+      "session.summary": "会话汇总",
+      "session.historical": "历史轮次",
       "session.untitled": "(未命名会话)",
       "source.copy": "复制路径",
       "source.open": "打开",
@@ -815,9 +828,43 @@
   }
 
   // ---------- data ----------
+  // CLI exports can contain several model aggregates for the same user turn.
+  // Present a single turn without changing their total or counting concurrent
+  // model durations twice. CSV/JSON source records remain available for audit.
+  function aggregateReportTurns(input, primaryHost) {
+    const groups = new Map();
+    for (const [index, r] of input.entries()) {
+      const key = r.session_id && r.turn_index != null
+        ? JSON.stringify([r.hostname || primaryHost || "unknown-host", r.source, r.session_id, r.turn_index])
+        : `summary:${index}`;
+      let group = groups.get(key);
+      if (!group) {
+        group = { row: { ...r, credits: 0 }, models: new Set(), start: Infinity, end: -Infinity, duration: 0 };
+        groups.set(key, group);
+      }
+      group.row.credits += Number(r.credits) || 0;
+      if (r.model) group.models.add(r.model);
+      if (r.session_total != null) group.row.session_total = Math.max(group.row.session_total || 0, r.session_total);
+      if (r.timestamp_ms != null) group.row.timestamp_ms = Math.max(group.row.timestamp_ms ?? r.timestamp_ms, r.timestamp_ms);
+      if (r.duration_ms > 0) {
+        group.duration = Math.max(group.duration, r.duration_ms);
+        if (r.timestamp_ms != null) {
+          group.start = Math.min(group.start, r.timestamp_ms - r.duration_ms);
+          group.end = Math.max(group.end, r.timestamp_ms);
+        }
+      }
+    }
+    return Array.from(groups.values(), group => ({
+      ...group.row,
+      model: Array.from(group.models).sort().join(" + "),
+      model_id: group.models.size > 1 ? null : group.row.model_id,
+      duration_ms: Math.max(group.duration, Number.isFinite(group.start) ? group.end - group.start : 0) || null
+    }));
+  }
+
   const PALETTE = ["#58a6ff", "#d2a8ff", "#3fb950", "#d29922", "#f85149", "#79c0ff", "#ff7b72", "#a5d6ff", "#56d364", "#ffa657"];
   const RAW = JSON.parse(document.getElementById("gh-usage-data").textContent);
-  const RECORDS = (RAW && RAW.records) ? RAW.records : [];
+  const RECORDS = aggregateReportTurns((RAW && RAW.records) ? RAW.records : [], RAW.primaryHost);
   const HOSTS = Array.from(new Set(RECORDS.map(r => r.hostname || RAW.primaryHost || "unknown-host"))).sort();
   const HOST_COLOR = Object.fromEntries(HOSTS.map((h, i) => [h, PALETTE[i % PALETTE.length]]));
   const SOURCES = Array.from(new Set(RECORDS.map(r => r.source))).sort();
@@ -898,7 +945,7 @@
     model:    { num: false, filter: true,  label: "cols.model",     get: r => r.model || "",                        text: r => r.model || "" },
     session:  { num: false, filter: true,  label: "cols.session",   get: r => sessionName(r),                       text: r => sessionName(r) },
     round:    { num: true,  filter: false, label: "cols.round",     get: r => (r.turn_index != null ? r.turn_index : -1), text: r => (r.turn_index != null ? String(r.turn_index) : "") },
-    credits:  { num: true,  filter: false, label: "cols.credits",   get: r => r.credits || 0,                       text: r => fmtUsage(r.credits, 2) },
+    credits:  { num: true,  filter: false, label: "cols.turnCredits", get: r => r.credits || 0,                      text: r => fmtUsage(r.credits, 2) },
     duration: { num: true,  filter: false, label: "cols.duration",  get: r => r.duration_ms || 0,                   text: r => fmtDuration(r.duration_ms) },
   };
   let SORT_KEY = "time";
@@ -1550,7 +1597,7 @@
       if (!sessions[sid]) sessions[sid] = { credits: 0, turns: 0, duration: 0, project: projectOf(r), total: r.session_total || 0 };
       const s = sessions[sid];
       s.credits += displayUsage(r.credits);
-      s.turns += 1;
+      if (r.turn_index != null) s.turns += 1;
       if (r.duration_ms != null && r.duration_ms > 0) s.duration += r.duration_ms;
       if (r.session_total) s.total = Math.max(s.total, r.session_total);
     }
@@ -1573,7 +1620,7 @@
       <tbody>${rows.map(([sid, s]) => `<tr style="cursor:pointer" data-session="${escapeHtml(sid)}">
         <td><span class="session-name mask" title="${escapeHtml(sid)}">${escapeHtml(sessionNameById(sid))}</span></td>
         <td><span class="${s.project === NO_PROJECT ? "" : "mask"}">${escapeHtml(projectLabel(s.project))}</span></td>
-        <td class="num">${s.total ? `${s.turns}/${s.total}` : s.turns}</td>
+        <td class="num">${s.total ? `${s.turns}/${s.total}` : (s.turns || t("session.summary"))}</td>
         <td class="num dur">${fmtDuration(s.duration)}</td>
         <td class="num">${fmtNum(s.credits, 1)}</td>
       </tr>`).join("")}</tbody>
@@ -1661,7 +1708,10 @@
           const roundTxt = (r.session_total != null)
             ? t("session.round", { i: r.turn_index, n: r.session_total })
             : t("session.roundOnly", { i: r.turn_index });
-          roundCell = `<span class="round-badge">${escapeHtml(roundTxt)}</span>`;
+          const historical = (r.details || "").includes("(historical turn)") ? ` · ${t("session.historical")}` : "";
+          roundCell = `<span class="round-badge">${escapeHtml(roundTxt + historical)}</span>`;
+        } else {
+          roundCell = `<span class="round-badge">${escapeHtml(t("session.summary"))}</span>`;
         }
       }
       return `

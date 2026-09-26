@@ -73,6 +73,12 @@ A per-project bar chart lets you click to filter, and a "top sessions by credits
 
 The records table supports keyword search, filtering by model and source, click-to-sort columns, and pagination. The screenshot below has privacy mode on — sensitive fields are masked automatically.
 
+**Read it as session → user turn.** A turn is one user request and the ensuing agent work, not an individual tool, MCP, or subagent call. The table shows one row per known turn with its recorded total, including recorded subtask usage, without expanding child billing. CLI model records sharing a turn are combined for display; the CSV/JSON keeps the source aggregates for audit. Old CLI session totals without turn information are labelled as summaries, not invented turns.
+
+**New and old VS Code logs are both supported.** The scanner replays snapshots and updates, using cumulative `copilotCredits` when available and `result.details` for older logs. If both exist, it selects the more complete total (allowing for the footer's rounding), never their sum. Already-included subagent costs are not added again. Active/interrupted turns can appear without a final footer; missing usage in another turn does not renumber later turns. Model labels describe turn-level attribution, not a per-subagent model bill.
+
+Rewind/retry does not refund already recorded usage: identifiable earlier requests are retained as **historical turns** and included in the session's exchange count and credits, even when no longer visible in the current chat.
+
 For Copilot CLI records, `events.jsonl` remains the traceable source while SQLite supplies precise credits and timing. Open a row's source popover and choose **Open** to jump to the matching JSONL event line in VS Code.
 
 ![Records table with privacy mask on](design/dashboard-records.jpg)
@@ -126,11 +132,17 @@ It writes two files to the current directory:
 
 ### 3. Open the report
 
-Double-click the HTML file. Search, filter, switch language, toggle privacy, and save a screenshot — all from the page.
+Run `gh-usage --view` to generate a fresh report and open it in your default browser immediately. `gh-usage -v` is the short form; `gh-usage -view` also works when `-view` is the first argument. CSV export is retained, and the terminal exits without waiting for a keypress.
+
+Alternatively, double-click an existing HTML file. Search, filter, switch language, toggle privacy, and save a screenshot — all from the page.
 
 ---
 
 ## 🛠️ Common commands
+
+Generate and open the report in one step: `gh-usage --view`. Combine it with filters, for example `gh-usage --view --since-days 7`, or choose a report path with `gh-usage --view --html report.html`.
+
+`--view` cannot be combined with `--no-html`. With `--output -`, CSV/JSON stays on stdout while HTML is saved as `copilot-usage-<machine>.html` in the current directory (or at `--html <PATH>`). Browser-launch messages go to stderr. Without `--view`, terminal and automation runs still do not open a browser. A desktop/default HTML handler is required; launch errors are reported without deleting the generated files.
 
 VS Code and GitHub Copilot CLI records are both included by default. To scan VS Code only:
 
@@ -166,6 +178,8 @@ gh-usage --merge .\shared\copilot-usage
 
 It reads every CSV, deduplicates records, and produces one combined report with a per-machine breakdown — handy for swapping machines, team reviews, or comparing your desktop against your laptop.
 
+Add `--view` to open the merged report immediately: `gh-usage --merge .\shared\copilot-usage --view`. Use `--html <PATH>` to override the merged HTML destination; relative paths are resolved from the current working directory.
+
 ---
 
 ## 📄 CSV fields
@@ -179,7 +193,7 @@ Each row is one usage record. Common fields include machine name, local time, se
 `gh-usage` is built for **local analysis and review** — great for spotting trends and rough comparisons, but **not a replacement for GitHub's official billing or usage reports**.
 
 - It only reads files that exist locally; deleted history can't be recovered.
-- Records without credit details are skipped.
+- Turns without any valid cumulative credits or legacy credit details are skipped; unknown usage is not assumed to be free. Active turns can grow after a report is generated.
 - USD/CNY values are estimates for local analysis. Exchange rates are user-configurable, and GitHub's billing page remains authoritative.
 - Copilot CLI event JSONL is the primary trace. The session title comes from `workspace.yaml.name` (or the first real JSONL user message when unnamed), and `workspace.yaml.cwd` identifies the project. `session-store.db` contributes exact credits, duration, and turn metadata only when its usage row matches a JSONL response.
 - It uses your system's standard VS Code and Copilot CLI data directories by default, and supports custom paths.
@@ -193,6 +207,7 @@ Each row is one usage record. Common fields include machine name, local time, se
 --since-days <N>         Only scan files modified within the last N days
 --output <PATH>          Write CSV or JSON to a specific path
 --html <PATH>            Write the HTML report to a specific path
+--view, -v               Generate HTML and open it in the default browser
 --no-html                Do not generate the HTML report
 --merge [DIR]            Merge existing copilot-usage-*.csv files into one report
 --format csv|json        Choose the output format

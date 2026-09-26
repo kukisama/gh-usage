@@ -8,7 +8,23 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [Unreleased]
+## [1.2.4] — 2026-09-26
+
+More complete usage totals for large multi-agent tasks, with one-command report viewing.
+
+### Added
+
+- **Generate and view with one command.** `gh-usage --view` (short form `-v`, or leading `-view`) generates fresh HTML and opens it with the default handler on Windows, macOS, and Linux, without a keypress pause. Works with filters, custom HTML paths, stdout exports, and `--merge`; launch failures report the saved file path. Existing export-only behavior is unchanged.
+
+### Fixed
+
+- **Long-running and interrupted VS Code tasks no longer lose their recorded usage.** Replay session snapshots and deltas, including standalone `copilotCredits` updates, instead of requiring a final credit footer. Cumulative totals already include subagents and are never added to child-tool costs or repeated snapshots.
+- **Preserve complete totals and precision across VS Code versions.** Reconcile the cumulative value with the final result total (allowing for footer rounding), retain larger final totals when a context-widget value is partial, and support legacy `1 credit` footers. Source links point to the selected billing value's journal line.
+- **Keep billed turns removed by rewind/retry.** A stable user-request ledger preserves their cost and labels them as historical turns, rather than silently dropping already incurred usage. Unrelated tool text no longer blocks parsing of billing fields.
+
+### Changed
+
+- **Reports stop at user-turn granularity.** One row represents one user exchange with its recorded subtask usage included. CLI model aggregates sharing a turn are combined for display; legacy session-only totals are explicitly labelled as summaries. Tools, MCP calls, and subagents are not shown as separate billing rows.
 
 ## [1.2.3] — 2026-08-06
 
@@ -96,7 +112,7 @@ The first stable release — fast, local, and to the point.
 
 ---
 
-[Unreleased]: https://github.com/kukisama/gh-usage/compare/v1.2.3...HEAD
+[1.2.4]: https://github.com/kukisama/gh-usage/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/kukisama/gh-usage/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.2
 [1.2.1]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.1

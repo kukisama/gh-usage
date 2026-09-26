@@ -73,6 +73,12 @@
 
 明细记录表支持关键词搜索、按模型/来源筛选、点击表头排序和分页。下图开启了隐私模式，敏感字段已自动打码。
 
+**按「会话 → 用户交流轮次」理解。** 一轮是一次用户请求及其后续 Agent 工作，不是一次工具、MCP 或子代理调用。已知轮次每轮一行，额度包含日志已记录的子任务用量，不展开子任务账单。CLI 同轮的多模型记录会在页面合并展示，CSV/JSON 保留来源汇总便于核对。旧 CLI 日志只有会话总额时标为「会话汇总」，不虚构轮次。
+
+**同时兼容新旧 VS Code 日志。** 重放快照和更新，有累计 `copilotCredits` 时优先读取，没有时沿用 `result.details`。两者并存时核对更完整的总额（允许文案四舍五入误差），绝不相加，也不再次累加已包含的子任务费用。进行中或中断的轮次没有最终文案也能计入；其他轮次缺少用量不会导致后续轮次重新编号。模型列是轮次归属，不是子代理逐模型账单。
+
+回退/重试不会撤销日志已记录的消费：能够识别的先前请求保留为**历史轮次**，计入会话的累计交流次数与额度，即使它已不再显示在当前对话中。
+
 对于 Copilot CLI 记录，`events.jsonl` 保持为可追溯的主来源，SQLite 负责补充精确 credits 和耗时。在记录来源弹层中点击「打开」，即可在 VS Code 中跳到对应的 JSONL 事件行。
 
 ![明细记录表（已开启隐私遮蔽）](dashboard-records.jpg)
@@ -126,11 +132,17 @@ gh-usage
 
 ### 3. 打开报告
 
-双击 HTML 文件即可。搜索、筛选、切换语言、开启隐私、保存截图，都在页面里完成。
+执行 `gh-usage --view`，即可生成最新报告并立即用默认浏览器打开。简写为 `gh-usage -v`，也兼容 `gh-usage -view`（`-view` 须放在第一个参数）。仍会保留 CSV 导出，终端无需等待按键即可退出。
+
+也可以直接双击已有的 HTML 文件。搜索、筛选、切换语言、开启隐私、保存截图，都在页面里完成。
 
 ---
 
 ## 🛠️ 常用命令
+
+一条命令生成并打开：`gh-usage --view`。可以组合筛选条件，例如 `gh-usage --view --since-days 7`；也可以指定报告位置：`gh-usage --view --html report.html`。
+
+`--view` 不能与 `--no-html` 同用。配合 `--output -` 时，CSV/JSON 仍输出到标准输出，HTML 则保存在当前目录的 `copilot-usage-<机器名>.html`（或 `--html <PATH>` 指定位置），浏览器启动提示写入标准错误。不加 `--view` 时，原有终端与自动化运行仍不会打开浏览器。打开报告需要桌面环境及默认 HTML 处理程序；启动失败会明确报错，已生成文件仍保留。
 
 默认会同时纳入 VS Code 和 GitHub Copilot CLI 记录。若只扫描 VS Code：
 
@@ -166,6 +178,8 @@ gh-usage --merge .\shared\copilot-usage
 
 它会读取所有 CSV、自动去重，并生成一份带「按机器对比」的汇总报告，适合换机、团队盘点或台式机与笔记本的对照。
 
+追加 `--view` 即可立即打开合并报告：`gh-usage --merge .\shared\copilot-usage --view`。可以通过 `--html <PATH>` 指定合并报告位置；相对路径以当前工作目录为基准。
+
 ---
 
 ## 📄 CSV 字段
@@ -179,7 +193,7 @@ gh-usage --merge .\shared\copilot-usage
 `gh-usage` 用于**本地分析与复盘**，适合了解趋势、做粗略对比，但**不能替代 GitHub 官方账单或使用量报告**。
 
 - 只扫描本机已有的文件，已删除的历史无法重建。
-- 没有额度明细的记录会被跳过。
+- 既没有有效累计额度、也没有旧版费用文案的轮次会被跳过，不将未知用量视为免费；进行中的轮次在生成报告后仍可能继续增长。
 - 美元/人民币金额仅供本地估算；汇率可由用户调整，最终以 GitHub 官方账单为准。
 - Copilot CLI 以事件 JSONL 作为主要追溯记录；会话标题取 `workspace.yaml.name`（未命名时回退 JSONL 首条真实用户消息），项目取 `workspace.yaml.cwd`。仅当 SQLite 用量行成功匹配 JSONL 响应时，`session-store.db` 才补充精确 credits、耗时和轮次字段。
 - 默认使用当前系统标准的 VS Code 与 Copilot CLI 数据目录，也支持自定义路径。
@@ -193,6 +207,7 @@ gh-usage --merge .\shared\copilot-usage
 --since-days <N>          只扫描最近 N 天内修改过的文件
 --output <PATH>           将 CSV 或 JSON 写到指定路径
 --html <PATH>             将 HTML 报告写到指定路径
+--view, -v                生成 HTML 后立即用默认浏览器打开
 --no-html                 不生成 HTML 报告
 --merge [DIR]             合并已有的 copilot-usage-*.csv 为一份报告
 --format csv|json         选择输出格式
