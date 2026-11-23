@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use walkdir::WalkDir;
 
+mod effort;
 mod vscode;
 
 #[cfg(test)]
@@ -84,6 +85,18 @@ struct Cli {
     #[arg(long)]
     no_bom: bool,
 
+    /// Also export an auditable Markdown report of local human submissions in half-hour slots (UTC+08:00).
+    #[arg(long, value_name = "PATH", conflicts_with = "merge")]
+    effort_report: Option<PathBuf>,
+
+    /// Do not collect or embed human effort slots in the HTML report.
+    #[arg(long, conflicts_with = "effort_report")]
+    no_effort: bool,
+
+    /// Limit the effort report to exact project names; repeat to combine projects.
+    #[arg(long, value_name = "NAME", requires = "effort_report")]
+    effort_project: Vec<String>,
+
     /// Merge mode. Read every `copilot-usage-*.csv` in DIR (or the current directory when DIR is omitted)
     /// and render a combined `copilot-usage-merged.html` next to those CSVs. Skips the local VS Code scan.
     #[arg(long, value_name = "DIR", num_args = 0..=1, default_missing_value = ".")]
@@ -126,6 +139,13 @@ struct UsageRecord {
     #[serde(default)]
     credits: f64,
     #[serde(default)]
+    request_count: Option<u64>,
+    // Read for compatibility with the transitional weighted CSV schema.
+    #[serde(default)]
+    premium_requests: Option<f64>,
+    #[serde(default)]
+    unclassified_usage: Option<f64>,
+    #[serde(default)]
     details: String,
     #[serde(default)]
     session_id: Option<String>,
@@ -153,6 +173,28 @@ struct UsageRecord {
     line: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum BillingUnit {
+    Credits,
+    RequestCount,
+    Unclassified,
+}
+
+impl UsageRecord {
+    fn amount(&self) -> (BillingUnit, f64) {
+        if let Some(value) = self.request_count { (BillingUnit::RequestCount, value as f64) }
+        else if let Some(value) = self.unclassified_usage { (BillingUnit::Unclassified, value) }
+        else { (BillingUnit::Credits, self.credits) }
+    }
+
+    fn set_amount(&mut self, unit: BillingUnit, value: f64) {
+        self.credits = if unit == BillingUnit::Credits { value } else { 0.0 };
+        self.request_count = (unit == BillingUnit::RequestCount).then_some(value as u64);
+        self.premium_requests = None;
+        self.unclassified_usage = (unit == BillingUnit::Unclassified).then_some(value);
+    }
+}
+
 #[derive(Debug, Default)]
 struct ScanStats {
     scanned_files: usize,
@@ -164,6 +206,7 @@ struct ScanStats {
 #[derive(Debug, Default)]
 struct FileScanResult {
     records: Vec<UsageRecord>,
+    effort: Vec<effort::Event>,
     scanned_lines: usize,
     json_candidate_lines: usize,
     parse_errors: usize,
@@ -180,6 +223,7 @@ struct RawUsageRecord {
     context: ContextFields,
     model: String,
     credits: f64,
+    unit: BillingUnit,
     details: String,
 }
 
@@ -208,11 +252,19 @@ struct CliEventMessage {
 }
 
 #[derive(Debug)]
+struct CliUsageEvent {
+    line: usize,
+    agent_id: Option<String>,
+    api_call_id: String,
+}
+
+#[derive(Debug)]
 struct CliShutdownMetric {
     line: usize,
     timestamp_ms: i64,
     model: String,
     credits: f64,
+    unit: BillingUnit,
 }
 
 #[derive(Debug, Default)]
@@ -222,8 +274,10 @@ struct CliSessionEvents {
     title: Option<String>,
     project: Option<String>,
     messages: Vec<CliEventMessage>,
+    // A None entry marks an ambiguous match within this session.
+    usage_events: HashMap<(i64, String, i64), Option<CliUsageEvent>>,
     used_api_calls: HashSet<String>,
-    shutdown_metrics: Vec<CliShutdownMetric>,
+    shutdown_metrics: HashMap<(Option<i64>, BillingUnit), Vec<CliShutdownMetric>>,
 }
 
 #[derive(Debug, Default)]
@@ -260,6 +314,7 @@ fn resolve_html_path(cli: &Cli, output: &Path, hostname: &str) -> Option<PathBuf
 
 fn main() -> Result<()> {
     let total_started = Instant::now();
+    let effort_until = effort::end_of_collection();
     let no_args = env::args_os().len() == 1;
     // Treat this as a true double-click only when launched directly from
     // Explorer (parent process is explorer.exe). Terminal runs, CI, and the
@@ -286,6 +341,17 @@ fn main() -> Result<()> {
         .unwrap_or_else(|| default_output_path(&hostname, cli.format));
 
     let html_path = resolve_html_path(&cli, &output_path, &hostname);
+    let html_effort = html_path.is_some() && !cli.no_effort;
+    let collect_effort = html_effort || cli.effort_report.is_some();
+    if let Some(path) = cli.effort_report.as_ref() {
+        anyhow::ensure!(!path.exists(), "effort report already exists: {} (use a new path)", path.display());
+        let report = std::path::absolute(path)?;
+        let same_path = |path: &Path| std::path::absolute(path).is_ok_and(|p| {
+            if cfg!(windows) { p.to_string_lossy().eq_ignore_ascii_case(&report.to_string_lossy()) } else { p == report }
+        });
+        anyhow::ensure!(!same_path(&output_path) && !html_path.as_deref().is_some_and(same_path),
+            "--effort-report must use a different path from the usage export");
+    }
 
     let vscode_root = cli
         .vscode_workspace_storage
@@ -294,15 +360,15 @@ fn main() -> Result<()> {
             "Could not determine VS Code workspaceStorage path; pass --vscode-workspace-storage",
         )?;
 
-    let copilot_cli_root = cli.copilot_cli_root.or_else(default_copilot_cli_root);
+    let copilot_cli_root = if !cli.no_cli_logs || cli.include_cli_logs {
+        cli.copilot_cli_root.or_else(default_copilot_cli_root)
+    } else { None };
     let cutoff = cli.since_days.map(cutoff_system_time);
 
     let mut files = collect_vscode_chat_session_files(&vscode_root, cutoff.as_ref())?;
     let mut cli_database_result = None;
 
-    if (!cli.no_cli_logs || cli.include_cli_logs)
-        && let Some(root) = copilot_cli_root.as_ref()
-    {
+    if let Some(root) = copilot_cli_root.as_ref() {
         match scan_cli_usage_database(root, cutoff.as_ref()) {
             Ok(Some(result)) => cli_database_result = Some(result),
             Ok(None) => files.extend(collect_cli_probe_files(root, cutoff.as_ref())?),
@@ -325,7 +391,7 @@ fn main() -> Result<()> {
     let project_map = build_project_map(&files);
     let mut file_results: Vec<FileScanResult> = files
         .par_iter()
-        .map(|path| scan_file(path, &project_map))
+        .map(|path| scan_file(path, &project_map, collect_effort))
         .collect();
     if let Some(result) = cli_database_result {
         file_results.push(result);
@@ -335,12 +401,14 @@ fn main() -> Result<()> {
         ..ScanStats::default()
     };
     let mut records = Vec::new();
+    let mut effort_events = Vec::new();
 
     for result in file_results {
         stats.scanned_lines += result.scanned_lines;
         stats.json_candidate_lines += result.json_candidate_lines;
         stats.parse_errors += result.parse_errors;
         records.extend(result.records);
+        effort_events.extend(result.effort);
     }
 
     records.sort_by(|a, b| {
@@ -363,12 +431,24 @@ fn main() -> Result<()> {
     }
     assign_turn_indices(&mut records);
 
+    let effort_since = cutoff.as_ref().and_then(system_time_to_unix_ms);
+    if collect_effort && let Some(root) = copilot_cli_root.as_deref() {
+        effort_events.extend(effort::scan_cli(root));
+    }
+    let effort_events = effort::prepare_events(effort_events, effort_since, effort_until);
     match cli.format {
         OutputFormat::Csv => write_csv(&output_path, &records, !cli.no_bom)?,
         OutputFormat::Json => write_json(&output_path, &records, !cli.no_bom)?,
     }
     if let Some(html_path) = html_path.as_ref() {
-        write_html(html_path, &records, &hostname)?;
+        write_html(html_path, &records, &hostname, html_effort.then_some(effort_events.as_slice()))?;
+    }
+    if let Some(path) = cli.effort_report.as_ref() {
+        effort::write_report(path, &effort_events, effort::Scope {
+            since: effort_since, until: effort_until,
+            vscode_root: &vscode_root, cli_root: copilot_cli_root.as_deref(),
+            parse_errors: stats.parse_errors, limited_files: cli.max_files, projects: &cli.effort_project,
+        })?;
     }
     let total_ms = total_started.elapsed().as_millis();
 
@@ -632,30 +712,43 @@ fn run_merge(dir: &Path, double_clicked: bool, view: bool, html: Option<&Path>) 
     let mut row_errors: usize = 0;
     for path in &csv_files {
         let before = records.len();
+        let host_from_name = path.file_stem().and_then(|s| s.to_str())
+            .and_then(|s| s.get("copilot-usage-".len()..)).filter(|s| !s.is_empty()).unwrap_or("unknown-host");
         let mut reader = csv::ReaderBuilder::new()
             .flexible(true)
             .from_path(path)
             .with_context(|| format!("open csv {}", path.display()))?;
         for row in reader.deserialize::<UsageRecord>() {
             match row {
-                Ok(record) => records.push(record),
+                Ok(mut record) => {
+                    if record.hostname.trim().is_empty() {
+                        record.hostname = host_from_name.to_owned();
+                    }
+                    // Older gh-usage exports gave requests.cost the wrong
+                    // label. The CSV alone cannot recover totalNanoAiu or tell
+                    // whether this machine was on the legacy billing plan.
+                    if record.request_count.is_none() && let Some(weighted) = record.premium_requests {
+                        if record.source == "vscode.chatSessions" && parse_premium_details(record.details.strip_suffix(" (historical turn)").unwrap_or(&record.details)).is_some() {
+                            record.set_amount(BillingUnit::RequestCount, 1.0);
+                        } else {
+                            record.set_amount(BillingUnit::Unclassified, weighted);
+                        }
+                    } else if record.amount().0 == BillingUnit::Credits
+                        && (record.source == "copilot.cli.events" && record.details.contains("(legacy session shutdown)")
+                            || record.source == "copilot.cli.probe" && record.details.starts_with("Copilot CLI "))
+                    {
+                        record.set_amount(BillingUnit::Unclassified, record.credits);
+                    }
+                    if !record.amount().1.is_finite() || record.amount().1 < 0.0 {
+                        row_errors += 1;
+                        continue;
+                    }
+                    records.push(record);
+                }
                 Err(_) => row_errors += 1,
             }
         }
         per_file.push((path.clone(), records.len() - before));
-    }
-
-    // Backfill hostname for legacy CSVs (pre-hostname column) using the file stem.
-    for (path, _) in &per_file {
-        let stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default();
-        if let Some(host_from_name) = stem.strip_prefix("copilot-usage-") {
-            for record in records.iter_mut().filter(|r| r.hostname.is_empty()) {
-                record.hostname = host_from_name.to_owned();
-            }
-        }
     }
 
     records.sort_by(|a, b| {
@@ -666,14 +759,19 @@ fn run_merge(dir: &Path, double_clicked: bool, view: bool, html: Option<&Path>) 
             .then_with(|| a.line.cmp(&b.line))
             .then_with(|| a.response_id.cmp(&b.response_id))
     });
-    records.dedup_by(|a, b| {
-        a.hostname == b.hostname
-            && a.file == b.file
-            && a.line == b.line
-            && a.request_id == b.request_id
-            && a.turn_index == b.turn_index
-            && a.response_id == b.response_id
-            && a.details == b.details
+    // Comparable keys need not be adjacent after sorting (one JSONL line
+    // can anchor several turns/models). Do not dedupe across hostnames.
+    let mut seen = HashSet::new();
+    let known_at_source: HashSet<_> = records.iter().filter(|r| r.unclassified_usage.is_none() && !r.file.is_empty())
+        .map(|r| (r.hostname.clone(), r.file.clone(), r.line, r.source.clone())).collect();
+    records.retain(|r| {
+        let (unit, number) = r.amount();
+        if unit == BillingUnit::Unclassified && !r.file.is_empty()
+            && known_at_source.contains(&(r.hostname.clone(), r.file.clone(), r.line, r.source.clone())) {
+            return false;
+        }
+        seen.insert((r.hostname.clone(), r.timestamp_ms, r.file.clone(), r.line, r.session_id.clone(),
+            r.request_id.clone(), r.response_id.clone(), r.turn_index, r.model.clone(), r.source.clone(), unit, number.to_bits()))
     });
     assign_turn_indices(&mut records);
 
@@ -687,7 +785,7 @@ fn run_merge(dir: &Path, double_clicked: bool, view: bool, html: Option<&Path>) 
 
     let html_path = html.map(Path::to_path_buf)
         .unwrap_or_else(|| dir.join("copilot-usage-merged.html"));
-    write_html(&html_path, &records, &primary_host)?;
+    write_html(&html_path, &records, &primary_host, None)?;
 
     // Compact merge summary, mirroring the look of the regular scan report.
     const INNER: usize = 54;
@@ -708,6 +806,7 @@ fn run_merge(dir: &Path, double_clicked: bool, view: bool, html: Option<&Path>) 
     let plain_border = || -> String { format!("+{}+\n", "-".repeat(INNER + 2)) };
 
     let total_credits = normalize_zero(records.iter().map(|r| r.credits).sum());
+    let unclassified = records.iter().filter(|r| r.unclassified_usage.is_some()).count();
     let host_list: Vec<&str> = hosts.iter().map(String::as_str).collect();
 
     let mut out = String::new();
@@ -733,6 +832,10 @@ fn run_merge(dir: &Path, double_clicked: bool, view: bool, html: Option<&Path>) 
         "target dir",
         clip(&dir.display().to_string(), 12)
     )));
+    for summary in historical_request_summary(&records) { out.push_str(&row(summary)); }
+    if unclassified > 0 {
+        out.push_str(&row(format!("unit unverified: {unclassified} rows (re-export source logs)")));
+    }
 
     out.push_str(&header("Sources"));
     for (path, count) in &per_file {
@@ -800,9 +903,11 @@ fn build_summary_report(
     total_ms: u128,
 ) -> String {
     let total_credits = normalize_zero(records.iter().map(|record| record.credits).sum());
+    let unclassified = records.iter().filter(|r| r.unclassified_usage.is_some()).count();
     let mut daily: BTreeMap<String, (usize, f64)> = BTreeMap::new();
 
     for record in records {
+        if record.amount().0 != BillingUnit::Credits { continue }
         let day = record
             .timestamp_ms
             .and_then(format_local_day)
@@ -875,6 +980,10 @@ fn build_summary_report(
         "total time",
         format!("{:.2} s", total_ms as f64 / 1000.0),
     ));
+    for summary in historical_request_summary(records) { report.push_str(&row(summary)); }
+    if unclassified > 0 {
+        report.push_str(&row(format!("unit unverified: {unclassified} rows")));
+    }
 
     if !daily.is_empty() {
         report.push_str(&header("Daily credits"));
@@ -896,6 +1005,20 @@ fn build_summary_report(
     }
     report.push_str(&plain_border());
     report
+}
+
+fn historical_request_summary(records: &[UsageRecord]) -> Vec<String> {
+    let mut counts = [0u64; 2];
+    let mut seen = [false; 2];
+    for record in records {
+        if let Some(count) = record.request_count {
+            let source = usize::from(record.source.starts_with("copilot.cli"));
+            counts[source] = counts[source].saturating_add(count);
+            seen[source] = true;
+        }
+    }
+    ["VS Code requests", "CLI model calls"].into_iter().enumerate()
+        .filter(|(i, _)| seen[*i]).map(|(i, label)| format!("history — {label}: {}", counts[i])).collect()
 }
 
 fn clip(s: &str, max: usize) -> String {
@@ -985,43 +1108,32 @@ fn collect_vscode_chat_session_files(
     root: &Path,
     cutoff: Option<&std::time::SystemTime>,
 ) -> Result<Vec<PathBuf>> {
-    if !root.exists() {
-        return Ok(Vec::new());
-    }
-
     let mut files = Vec::new();
-    for workspace_entry in fs::read_dir(root)? {
-        let Ok(workspace_entry) = workspace_entry else {
-            continue;
-        };
-        let Ok(file_type) = workspace_entry.file_type() else {
-            continue;
-        };
-        if !file_type.is_dir() {
-            continue;
+    if root.exists() {
+        for entry in fs::read_dir(root)?.flatten().filter(|entry| entry.file_type().is_ok_and(|t| t.is_dir())) {
+            collect_vscode_session_directory(&entry.path().join("chatSessions"), cutoff, &mut files);
         }
-
-        let chat_sessions = workspace_entry.path().join("chatSessions");
-        let Ok(session_entries) = fs::read_dir(chat_sessions) else {
-            continue;
-        };
-
-        for session_entry in session_entries {
-            let Ok(session_entry) = session_entry else {
-                continue;
-            };
-            let path = session_entry.path();
-            if path.extension().and_then(|extension| extension.to_str()) != Some("jsonl") {
-                continue;
-            }
-            if !modified_after(&path, cutoff) {
-                continue;
-            }
-            files.push(path);
-        }
+    }
+    // VS Code saves no-folder chats under globalStorage, not workspaceStorage.
+    if let Some(user) = root.parent().filter(|_| root.file_name().is_some_and(|n| n.eq_ignore_ascii_case("workspaceStorage"))) {
+        collect_vscode_session_directory(&user.join("globalStorage/emptyWindowChatSessions"), cutoff, &mut files);
     }
 
     Ok(files)
+}
+
+fn collect_vscode_session_directory(dir: &Path, cutoff: Option<&std::time::SystemTime>, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten().filter(|entry| entry.file_type().is_ok_and(|t| t.is_file())) {
+        let path = entry.path();
+        let wanted = match path.extension().and_then(|ext| ext.to_str()) {
+            Some("jsonl") => true,
+            // A JSONL journal can replace the old snapshot in a migration.
+            Some("json") => !path.with_extension("jsonl").is_file(),
+            _ => false,
+        };
+        if wanted && modified_after(&path, cutoff) { files.push(path); }
+    }
 }
 
 fn collect_cli_probe_files(
@@ -1126,6 +1238,7 @@ fn scan_cli_usage_connection(
     let mut aggregates: BTreeMap<(String, Option<u32>, String), CliUsageAggregate> =
         BTreeMap::new();
     let mut sessions_with_database_usage = HashSet::new();
+    let mut unmatched_calls = 0;
     for row in rows {
         result.scanned_lines += 1;
         result.json_candidate_lines += 1;
@@ -1150,7 +1263,20 @@ fn scan_cli_usage_connection(
             &model,
             agent_id_is_present(&agent_id),
         )
+            .or_else(|| {
+                match_cli_usage_event(
+                    &mut session_events,
+                    &session_id,
+                    completed_at_ms,
+                    &model,
+                    total_nano_aiu,
+                    agent_id.as_deref().filter(|id| !id.is_empty()),
+                )
+            })
         else {
+            if cutoff_ms.is_none_or(|cutoff| completed_at_ms >= cutoff) {
+                unmatched_calls += 1;
+            }
             continue;
         };
         sessions_with_database_usage.insert(session_id.clone());
@@ -1198,6 +1324,9 @@ fn scan_cli_usage_connection(
             entry.project = project;
         }
     }
+    if unmatched_calls > 0 {
+        eprintln!("warning: {unmatched_calls} Copilot CLI usage rows could not be matched to a JSONL event");
+    }
 
     let mut session_totals: HashMap<String, u32> = HashMap::new();
     for aggregate in aggregates.values() {
@@ -1233,6 +1362,9 @@ fn scan_cli_usage_connection(
             model: aggregate.model.clone(),
             model_id: Some(aggregate.model),
             credits: aggregate.credits,
+            request_count: None,
+            premium_requests: None,
+            unclassified_usage: None,
             details,
             session_id: Some(aggregate.session_id.clone()),
             request_id: None,
@@ -1351,28 +1483,49 @@ fn read_cli_session_events(path: &Path) -> Option<CliSessionEvents> {
                     .is_some_and(|agent| !agent.is_empty()),
                 api_call_id: api_call_id.to_owned(),
             });
-        } else if event_type == Some("session.shutdown") {
-            let Some(model_metrics) = data
-                .and_then(|data| data.get("modelMetrics"))
-                .and_then(Value::as_object)
+        } else if event_type == Some("session.usage_record") {
+            // CLI can bill a call under its requested model while the assistant
+            // message is attributed to a different model (e.g. a fusion phase).
+            let Some(usage) = data.and_then(|data| data.get("usage")) else {
+                continue;
+            };
+            let Some(model) = usage.get("model").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(total_nano_aiu) = usage.pointer("/copilotUsage/totalNanoAiu")
+                .and_then(Value::as_i64).filter(|&credits| credits > 0)
             else {
                 continue;
             };
-            for (model, metrics) in model_metrics {
-                let Some(credits) = metrics
-                    .get("requests")
-                    .and_then(|requests| requests.get("cost"))
-                    .and_then(value_as_f64)
-                else {
-                    continue;
-                };
-                if credits > 0.0 {
-                    events.shutdown_metrics.push(CliShutdownMetric {
-                        line: line_number,
-                        timestamp_ms,
-                        model: model.clone(),
-                        credits,
-                    });
+            let Some(api_call_id) = usage.get("apiCallId").and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+            else {
+                continue;
+            };
+            let agent_id = object.get("agentId").and_then(Value::as_str)
+                .filter(|id| !id.is_empty()).map(ToOwned::to_owned);
+            events.usage_events.entry((timestamp_ms, model.to_owned(), total_nano_aiu))
+                .and_modify(|entry| *entry = None)
+                .or_insert_with(|| Some(CliUsageEvent {
+                    line: line_number,
+                    agent_id,
+                    api_call_id: api_call_id.to_owned(),
+                }));
+        } else if event_type == Some("session.shutdown") {
+            if let Some(data) = data {
+                let amounts = cli_shutdown_amounts(data);
+                for unit in [BillingUnit::Credits, BillingUnit::RequestCount, BillingUnit::Unclassified] {
+                    let amounts: Vec<_> = amounts.iter().filter(|(_, kind, _)| *kind == unit).collect();
+                    if amounts.is_empty() { continue }
+                    let start = data.get("sessionStartTime").and_then(Value::as_i64);
+                    let previous = events.shutdown_metrics.entry((start, unit)).or_default();
+                    // A resumed conversation can replay a cumulative shutdown
+                    // or report a smaller partial total. Neither is a delta.
+                    if amounts.iter().map(|(_, _, n)| n).sum::<f64>() > previous.iter().map(|m| m.credits).sum::<f64>() {
+                        *previous = amounts.into_iter().map(|(model, unit, credits)| CliShutdownMetric {
+                            line: line_number, timestamp_ms, model: model.clone(), unit: *unit, credits: *credits,
+                        }).collect();
+                    }
                 }
             }
         }
@@ -1446,6 +1599,23 @@ fn match_cli_event_message(
     Some((events.path.clone(), message.line, message.timestamp_ms))
 }
 
+fn match_cli_usage_event(
+    sessions: &mut HashMap<String, CliSessionEvents>,
+    session_id: &str,
+    timestamp_ms: i64,
+    model: &str,
+    total_nano_aiu: i64,
+    agent_id: Option<&str>,
+) -> Option<(PathBuf, usize, i64)> {
+    let events = sessions.get_mut(session_id)?;
+    let event = events.usage_events.get(&(timestamp_ms, model.to_owned(), total_nano_aiu))?
+        .as_ref()?;
+    if event.agent_id.as_deref() != agent_id || !events.used_api_calls.insert(event.api_call_id.clone()) {
+        return None;
+    }
+    Some((events.path.clone(), event.line, timestamp_ms))
+}
+
 fn append_legacy_cli_shutdown_records(
     result: &mut FileScanResult,
     session_events: &HashMap<String, CliSessionEvents>,
@@ -1453,15 +1623,15 @@ fn append_legacy_cli_shutdown_records(
     cutoff_ms: Option<i64>,
 ) {
     for (session_id, events) in session_events {
-        if sessions_with_database_usage.contains(session_id) {
-            continue;
-        }
-        for metric in &events.shutdown_metrics {
+        for metric in events.shutdown_metrics.values().flatten() {
+            if metric.unit != BillingUnit::RequestCount && sessions_with_database_usage.contains(session_id) {
+                continue;
+            }
             if cutoff_ms.is_some_and(|cutoff| metric.timestamp_ms < cutoff) {
                 continue;
             }
             result.json_candidate_lines += 1;
-            result.records.push(UsageRecord {
+            let mut record = UsageRecord {
                 source: "copilot.cli.events".to_owned(),
                 hostname: String::new(),
                 timestamp_ms: Some(metric.timestamp_ms),
@@ -1470,10 +1640,10 @@ fn append_legacy_cli_shutdown_records(
                 model: metric.model.clone(),
                 model_id: Some(metric.model.clone()),
                 credits: metric.credits,
-                details: format!(
-                    "Copilot CLI {} (legacy session shutdown) • {} credits",
-                    metric.model, metric.credits
-                ),
+                request_count: None,
+                premium_requests: None,
+                unclassified_usage: None,
+                details: shutdown_details(&metric.model, metric.unit, metric.credits),
                 session_id: Some(session_id.clone()),
                 request_id: None,
                 response_id: None,
@@ -1484,7 +1654,9 @@ fn append_legacy_cli_shutdown_records(
                 session_total: None,
                 file: events.path.to_string_lossy().into_owned(),
                 line: metric.line,
-            });
+            };
+            record.set_amount(metric.unit, metric.credits);
+            result.records.push(record);
         }
     }
 }
@@ -1536,11 +1708,19 @@ fn modified_after(path: &Path, cutoff: Option<&std::time::SystemTime>) -> bool {
     }
 }
 
-fn scan_file(path: &Path, project_map: &HashMap<PathBuf, String>) -> FileScanResult {
-    if has_component(path, "chatSessions") {
+fn scan_file(path: &Path, project_map: &HashMap<PathBuf, String>, collect_effort: bool) -> FileScanResult {
+    if path.parent().and_then(Path::file_name).is_some_and(|name|
+        name.eq_ignore_ascii_case("chatSessions") || name.eq_ignore_ascii_case("emptyWindowChatSessions")) {
         let project = workspace_dir_for_session(path)
             .and_then(|dir| project_map.get(&dir).cloned());
-        return vscode::scan(path, project);
+        return vscode::scan(path, project, collect_effort);
+    }
+    // Fallback without SQLite still uses the same shutdown replay semantics.
+    if let Some(session) = cli_session_id_from_event_path(path)
+        && let Some(events) = read_cli_session_events(path) {
+        let mut result = FileScanResult { scanned_lines: events.scanned_lines, ..FileScanResult::default() };
+        append_legacy_cli_shutdown_records(&mut result, &HashMap::from([(session, events)]), &HashSet::new(), None);
+        return result;
     }
     let mut result = FileScanResult::default();
 
@@ -1627,7 +1807,7 @@ fn scan_file(path: &Path, project_map: &HashMap<PathBuf, String>) -> FileScanRes
                 for raw in extraction.records {
                     let local =
                         enrich_from_response_metadata(raw.context, &extraction.response_metadata);
-                    let record = UsageRecord {
+                    let mut record = UsageRecord {
                         source: source.to_owned(),
                         hostname: String::new(),
                         timestamp_ms: local.timestamp_ms,
@@ -1636,6 +1816,9 @@ fn scan_file(path: &Path, project_map: &HashMap<PathBuf, String>) -> FileScanRes
                         model: raw.model,
                         model_id: local.model_id.as_deref().map(display_model_id),
                         credits: raw.credits,
+                        request_count: None,
+                        premium_requests: None,
+                        unclassified_usage: None,
                         details: raw.details,
                         session_id: local.session_id.clone().or_else(|| cli_session_id.clone()),
                         request_id: local.request_id.clone(),
@@ -1648,6 +1831,7 @@ fn scan_file(path: &Path, project_map: &HashMap<PathBuf, String>) -> FileScanRes
                         file: path.to_string_lossy().into_owned(),
                         line: line_index,
                     };
+                    record.set_amount(raw.unit, raw.credits);
                     store_scanned_record(&mut result.records, &mut vscode_response_records, record);
                 }
             }
@@ -1713,13 +1897,13 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
 }
 
 fn is_usage_candidate_line(source: &str, line: &[u8]) -> bool {
-    if contains_bytes(line, b"credits") && contains_bytes(line, b"details") {
+    if contains_bytes(line, b"details") && (contains_bytes(line, b"credits") || contains_bytes(line, b"premium request")) {
         return true;
     }
 
     source == "copilot.cli.probe"
         && contains_bytes(line, b"session.shutdown")
-        && contains_bytes(line, b"modelMetrics")
+        && (contains_bytes(line, b"modelMetrics") || contains_bytes(line, b"totalNanoAiu") || contains_bytes(line, b"totalPremiumRequests"))
 }
 
 fn collect_line_extraction(value: &Value, context: ContextFields, extraction: &mut LineExtraction) {
@@ -1742,12 +1926,14 @@ fn collect_line_extraction(value: &Value, context: ContextFields, extraction: &m
             }
 
             if let Some(details) = map.get("details").and_then(Value::as_str)
-                && let Some((model, credits)) = parse_credit_details(details)
+                && let Some((model, unit, credits)) = parse_credit_details(details).map(|(m, n)| (m, BillingUnit::Credits, n))
+                    .or_else(|| parse_premium_details(details).map(|(m, _)| (m, BillingUnit::RequestCount, 1.0)))
             {
                 extraction.records.push(RawUsageRecord {
                     context: local.clone(),
                     model,
                     credits,
+                    unit,
                     details: details.to_owned(),
                 });
             }
@@ -1771,37 +1957,46 @@ fn collect_cli_shutdown_metrics(
         return;
     }
 
-    let Some(model_metrics) = map
-        .get("data")
-        .and_then(|data| data.get("modelMetrics"))
-        .and_then(Value::as_object)
-    else {
-        return;
-    };
-
-    for (model, metrics) in model_metrics {
-        let Some(credits) = metrics
-            .get("requests")
-            .and_then(|requests| requests.get("cost"))
-            .and_then(value_as_f64)
-        else {
-            continue;
-        };
-
+    let Some(data) = map.get("data").and_then(Value::as_object) else { return };
+    for (model, unit, credits) in cli_shutdown_amounts(data) {
+        let details = shutdown_details(&model, unit, credits);
         extraction.records.push(RawUsageRecord {
             context: context.clone(),
-            model: model.clone(),
+            model,
             credits,
-            details: format!("Copilot CLI {model} • {credits} credits"),
+            unit,
+            details,
         });
     }
 }
 
-fn value_as_f64(value: &Value) -> Option<f64> {
-    match value {
-        Value::Number(number) => number.as_f64(),
-        _ => None,
+fn cli_shutdown_amounts(data: &serde_json::Map<String, Value>) -> Vec<(String, BillingUnit, f64)> {
+    let positive = |v: &Value| v.as_f64().filter(|n| n.is_finite() && *n > 0.0);
+    // Some new builds retain a shadow premium counter. When nano-AIU is
+    // present (including explicit zero), do not classify the log as history.
+    if let Some(nano) = data.get("totalNanoAiu").and_then(Value::as_f64).filter(|n| n.is_finite() && *n >= 0.0) {
+        return (nano > 0.0).then(|| ("Unattributed".into(), BillingUnit::Credits, nano / 1_000_000_000.0)).into_iter().collect();
     }
+    let legacy = data.get("totalPremiumRequests").and_then(Value::as_f64).is_some_and(|n| n.is_finite() && n >= 0.0);
+    let models = data.get("modelMetrics").and_then(Value::as_object).into_iter().flatten();
+    let mut rows = Vec::new();
+    for (model, data) in models {
+        if legacy && let Some(count) = data.pointer("/requests/count").and_then(Value::as_u64) {
+            if count > 0 { rows.push((model.clone(), BillingUnit::RequestCount, count as f64)); }
+        } else if let Some(value) = data.pointer("/requests/cost").and_then(positive) {
+            rows.push((model.clone(), BillingUnit::Unclassified, value));
+        }
+    }
+    rows
+}
+
+fn shutdown_details(model: &str, unit: BillingUnit, n: f64) -> String {
+    let label = match unit {
+        BillingUnit::Credits => "AI credits (totalNanoAiu)",
+        BillingUnit::RequestCount => "model requests (raw requests.count)",
+        BillingUnit::Unclassified => "usage (unit not recorded)",
+    };
+    format!("Copilot CLI {model} (session shutdown) • {n} {label}")
 }
 
 /// Returns the workspaceStorage/<hash> directory that owns a chatSessions file:
@@ -1903,7 +2098,7 @@ fn assign_turn_indices(records: &mut [UsageRecord]) {
     let mut explicit_totals: HashMap<(String, String), u32> = HashMap::new();
     let mut implicit_totals: HashMap<(String, String), u32> = HashMap::new();
     for record in records.iter() {
-        if is_cli_session_summary(record) {
+        if is_session_summary(record) {
             continue;
         }
         if let Some(session) = record.session_id.as_ref() {
@@ -1921,7 +2116,7 @@ fn assign_turn_indices(records: &mut [UsageRecord]) {
     }
     let mut seen: HashMap<(String, String), u32> = HashMap::new();
     for record in records.iter_mut() {
-        if is_cli_session_summary(record) {
+        if is_session_summary(record) {
             record.turn_index = None;
             record.session_total = None;
             continue;
@@ -1943,9 +2138,9 @@ fn assign_turn_indices(records: &mut [UsageRecord]) {
     }
 }
 
-fn is_cli_session_summary(record: &UsageRecord) -> bool {
-    record.source.starts_with("copilot.cli")
-        && (record.details.contains("legacy session shutdown")
+fn is_session_summary(record: &UsageRecord) -> bool {
+    record.source == "vscode.sessionCost" || record.source.starts_with("copilot.cli")
+        && (record.details.contains("session shutdown")
             || (record.source == "copilot.cli.probe" && record.request_id.is_none()))
 }
 
@@ -2023,6 +2218,16 @@ fn parse_credit_details(details: &str) -> Option<(String, f64)> {
     }
 }
 
+fn parse_premium_details(details: &str) -> Option<(String, f64)> {
+    let (model, usage) = details.trim().rsplit_once('•')?;
+    let usage = usage.trim();
+    let value = usage.strip_suffix(" premium requests")
+        .or_else(|| usage.strip_suffix(" premium request"))
+        .or_else(|| usage.strip_suffix(['x', '×']))?.trim().parse::<f64>().ok()?;
+    let model = model.trim();
+    (!model.is_empty() && value.is_finite() && value >= 0.0).then(|| (model.to_owned(), value))
+}
+
 fn display_model_id(model_id: &str) -> String {
     model_id
         .strip_prefix("copilot/")
@@ -2075,6 +2280,9 @@ fn collect_records_from_text(
             model,
             model_id: None,
             credits,
+            request_count: None,
+            premium_requests: None,
+            unclassified_usage: None,
             details: candidate.to_owned(),
             session_id: None,
             request_id: None,
@@ -2346,13 +2554,21 @@ const REPORT_TEMPLATE: &str = include_str!("report-template.html");
 const REPORT_DATA_PLACEHOLDER: &str = "__GH_USAGE_DATA__";
 const REPORT_SNAPDOM: &str = include_str!("snapdom.js");
 const REPORT_SNAPDOM_PLACEHOLDER: &str = "__GH_USAGE_SNAPDOM__";
+const REPORT_EFFORT_SCRIPT: &str = include_str!("report-effort.js");
+const REPORT_EFFORT_STYLE: &str = include_str!("report-effort.css");
+const REPORT_SHEETS_SCRIPT: &str = include_str!("report-sheets.js");
 
-fn write_html(path: &Path, records: &[UsageRecord], primary_host: &str) -> Result<()> {
-    let payload = serde_json::json!({
+fn write_html(path: &Path, records: &[UsageRecord], primary_host: &str, effort: Option<&[effort::Event]>) -> Result<()> {
+    let (credits, history): (Vec<_>, Vec<_>) = records.iter().partition(|r| r.amount().0 == BillingUnit::Credits);
+    let mut payload = serde_json::json!({
         "generatedAt": Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
         "primaryHost": primary_host,
-        "records": records,
+        "records": credits,
+        "history": history,
     });
+    if let Some(events) = effort {
+        payload["effort"] = serde_json::to_value(effort::html_events(events))?;
+    }
 
     let mut data = serde_json::to_string(&payload)?;
     // Avoid prematurely closing the inline <script> block. JSON has no literal "</",
@@ -2362,6 +2578,9 @@ fn write_html(path: &Path, records: &[UsageRecord], primary_host: &str) -> Resul
     // Inject the snapdom library first (its own <script> block), then the JSON
     // data. The library is inserted verbatim and is NOT subject to the data escaping.
     let html = REPORT_TEMPLATE
+        .replace("__GH_USAGE_SHEETS_SCRIPT__", REPORT_SHEETS_SCRIPT)
+        .replace("__GH_USAGE_EFFORT_SCRIPT__", REPORT_EFFORT_SCRIPT)
+        .replace("__GH_USAGE_EFFORT_STYLE__", REPORT_EFFORT_STYLE)
         .replace(REPORT_SNAPDOM_PLACEHOLDER, REPORT_SNAPDOM)
         .replace(REPORT_DATA_PLACEHOLDER, &data);
 
@@ -2374,7 +2593,7 @@ fn write_html(path: &Path, records: &[UsageRecord], primary_host: &str) -> Resul
 #[cfg(test)]
 mod tests {
     use super::{
-        ContextFields, LineExtraction, UsageRecord, assign_turn_indices, collect_line_extraction,
+        BillingUnit, ContextFields, LineExtraction, UsageRecord, assign_turn_indices, collect_line_extraction,
         extract_cli_user_title_from_line, extract_custom_title, normalized_cli_title, parse_credit_details,
         project_name_from_cli_path, quick_extract_title_from_line, scan_cli_usage_connection, scan_file,
     };
@@ -2448,9 +2667,10 @@ mod tests {
             "type": "session.shutdown",
             "timestamp": "2026-05-18T10:56:39.403Z",
             "data": {
+                "totalPremiumRequests": 1,
                 "modelMetrics": {
                     "gpt-5.4": {
-                        "requests": {"count": 1, "cost": 1},
+                        "requests": {"count": 3, "cost": 1},
                         "usage": {"inputTokens": 20028, "outputTokens": 62}
                     }
                 }
@@ -2462,7 +2682,8 @@ mod tests {
 
         assert_eq!(extraction.records.len(), 1);
         assert_eq!(extraction.records[0].model, "gpt-5.4");
-        assert_eq!(extraction.records[0].credits, 1.0);
+        assert_eq!(extraction.records[0].credits, 3.0);
+        assert_eq!(extraction.records[0].unit, BillingUnit::RequestCount);
         assert_eq!(
             extraction.records[0].context.timestamp_ms,
             Some(1779101799403)
@@ -2506,7 +2727,7 @@ mod tests {
             &legacy_events,
             concat!(
                 "{\"type\":\"user.message\",\"timestamp\":\"2026-08-01T00:00:30Z\",\"data\":{\"content\":\"Legacy JSONL title\"}}\n",
-                "{\"type\":\"session.shutdown\",\"timestamp\":\"2026-08-01T00:01:00Z\",\"data\":{\"modelMetrics\":{\"gpt-legacy\":{\"requests\":{\"cost\":1}}}}}\n"
+                "{\"type\":\"session.shutdown\",\"timestamp\":\"2026-08-01T00:01:00Z\",\"data\":{\"totalPremiumRequests\":1,\"modelMetrics\":{\"gpt-legacy\":{\"requests\":{\"cost\":1,\"count\":3}}}}}\n"
             ),
         )
         .unwrap();
@@ -2583,7 +2804,7 @@ mod tests {
             .iter()
             .find(|record| record.session_id.as_deref() == Some("session-legacy"))
             .unwrap();
-        assert_eq!(legacy.credits, 1.0);
+        assert_eq!(legacy.amount(), (BillingUnit::RequestCount, 3.0));
         assert_eq!(legacy.model, "gpt-legacy");
         assert_eq!(legacy.project.as_deref(), Some("legacy-jsonl-project"));
         assert_eq!(
@@ -2598,6 +2819,54 @@ mod tests {
             .all(|record| record.session_id.as_deref() != Some("session-db-only")));
 
         fs::remove_dir_all(cli_root).unwrap();
+    }
+
+    #[test]
+    fn matches_cli_usage_events_when_response_model_differs() {
+        let root = temporary_cli_root("cli-usage-events");
+        let events = root.join("session-state/session/events.jsonl");
+        fs::create_dir_all(events.parent().unwrap()).unwrap();
+        let usage = |second: u32, model: &str, api: &str, nano: i64| json!({
+            "type": "session.usage_record",
+            "timestamp": format!("2026-11-23T00:00:{second:02}.123Z"),
+            "data": {"usage": {"model": model, "apiCallId": api,
+                "copilotUsage": {"totalNanoAiu": nano}}}
+        });
+        let response = |second: u32, model: &str, api: &str| json!({
+            "type": "assistant.message",
+            "timestamp": format!("2026-11-23T00:00:{second:02}.123Z"),
+            "data": {"model": model, "apiCallId": api}
+        });
+        let log = [
+            usage(10, "ordinary", "first", 1_000_000_000),
+            response(10, "ordinary", "first"),
+            usage(20, "phase-model", "second", 2_250_000_000),
+            response(25, "fusion-model", "second"),
+            usage(30, "phase-model", "third", 4_100_000_000),
+        ];
+        fs::write(&events, log.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n")).unwrap();
+
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE assistant_usage_events (
+                id INTEGER PRIMARY KEY, session_id TEXT, turn_index INTEGER, model TEXT,
+                total_nano_aiu INTEGER, duration_ms INTEGER, created_at TEXT, agent_id TEXT
+            );
+            INSERT INTO assistant_usage_events VALUES
+                (1, 'session', 0, 'ordinary', 1000000000, 500, '2026-11-23T00:00:10.123Z', NULL),
+                (2, 'session', 0, 'phase-model', 2250000000, 2000, '2026-11-23T00:00:20.123Z', NULL),
+                (3, 'session', 0, 'phase-model', 4000000000, 500, '2026-11-23T00:00:30.123Z', NULL);",
+        ).unwrap();
+
+        let result = scan_cli_usage_connection(&db, &root.join("session-store.db"), None).unwrap();
+        assert_eq!(result.parse_errors, 0);
+        assert_eq!(result.records.len(), 2);
+        let ordinary = result.records.iter().find(|r| r.model == "ordinary").unwrap();
+        assert_eq!((ordinary.line, ordinary.credits), (2, 1.0));
+        let phase = result.records.iter().find(|r| r.model == "phase-model").unwrap();
+        assert_eq!(PathBuf::from(&phase.file), events);
+        assert_eq!((phase.line, phase.credits, phase.duration_ms, phase.turn_index), (3, 2.25, Some(2000), Some(1)));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -2633,7 +2902,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut result = scan_file(&events, &HashMap::new());
+        let mut result = scan_file(&events, &HashMap::new(), false);
         assign_turn_indices(&mut result.records);
 
         assert_eq!(result.records.len(), 1);
@@ -2644,7 +2913,7 @@ mod tests {
         assert_eq!(record.chat_title.as_deref(), Some("Old CLI title property"));
         assert_eq!(record.project.as_deref(), Some("old-project"));
         assert_eq!(record.model, "gpt-old");
-        assert_eq!(record.credits, 2.0);
+        assert_eq!(record.amount(), (BillingUnit::Unclassified, 2.0));
         assert_eq!(record.file, events.to_string_lossy());
         assert_eq!(record.line, 2);
 
@@ -2666,7 +2935,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = scan_file(&session, &HashMap::new());
+        let result = scan_file(&session, &HashMap::new(), false);
 
         assert_eq!(result.records.len(), 2);
         let first = result
@@ -2692,6 +2961,9 @@ mod tests {
             model: "model".to_owned(),
             model_id: None,
             credits: 1.0,
+            request_count: None,
+            premium_requests: None,
+            unclassified_usage: None,
             details: String::new(),
             session_id: Some("session".to_owned()),
             request_id: None,
@@ -2709,5 +2981,30 @@ mod tests {
 
         assert_eq!(records[0].turn_index, Some(3));
         assert_eq!(records[0].session_total, Some(3));
+    }
+
+    #[test]
+    fn shutdown_prefers_explicit_nano_aiu_without_reusing_requests_cost() {
+        let data = json!({"totalNanoAiu": 125500000000u64, "totalPremiumRequests": 3,
+            "modelMetrics": {"old-model": {"requests": {"cost": 3}}}});
+        assert_eq!(super::cli_shutdown_amounts(data.as_object().unwrap()),
+            vec![("Unattributed".to_owned(), BillingUnit::Credits, 125.5)]);
+    }
+
+    #[test]
+    fn resumed_cli_shutdown_snapshots_are_not_added() {
+        let root = temporary_cli_root("resumed-cli");
+        let events = root.join("session-state/old-session/events.jsonl");
+        fs::create_dir_all(events.parent().unwrap()).unwrap();
+        let journal = [1, 1, 3, 2].iter().enumerate().map(|(index, amount)| json!({
+            "type":"session.shutdown", "timestamp": format!("2026-10-21T00:00:0{index}Z"),
+            "data": {"sessionStartTime": 1234, "totalNanoAiu": *amount * 1_000_000_000u64, "totalPremiumRequests": 15}
+        }).to_string()).collect::<Vec<_>>().join("\n");
+        fs::write(&events, journal).unwrap();
+        let result = scan_file(&events, &HashMap::new(), false);
+        assert_eq!(result.records.len(), 1);
+        assert_eq!(result.records[0].amount(), (BillingUnit::Credits, 3.0));
+        assert_eq!(result.records[0].line, 3);
+        fs::remove_dir_all(root).unwrap();
     }
 }

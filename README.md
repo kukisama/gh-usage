@@ -10,6 +10,8 @@ English | [简体中文](design/README.zh-CN.md)
 > One command turns your scattered local GitHub Copilot usage records into a clean, visual report.
 > Nothing is uploaded, nothing phones home — your data stays on your machine.
 
+[What's new in 1.2.5](CHANGELOG.md#125--2026-11-23)
+
 ![gh-usage report overview](design/01.jpg)
 
 ---
@@ -51,6 +53,8 @@ The report is a **single self-contained HTML file** — double-click to open it 
 
 ## 📊 What's in the report
 
+**Usage** shows GitHub AI Credits. **Effort time** shows when you submitted requests. **Historical requests** appears when legacy request-era records are available. Machine and project filters apply across sheets; Historical requests keeps its own date range.
+
 ### Key metrics at a glance
 
 Total credits, active days, record count, daily average, total AI interaction time, and average time per exchange — the numbers you care about, right at the top.
@@ -79,9 +83,15 @@ The records table supports keyword search, filtering by model and source, click-
 
 Rewind/retry does not refund already recorded usage: identifiable earlier requests are retained as **historical turns** and included in the session's exchange count and credits, even when no longer visible in the current chat.
 
+The scanner reads JSON snapshots and JSONL journals for workspace and no-folder chats. With no final credit footer, it retains the highest recorded cumulative turn value. If a reported session total is higher than the sum of its turns, only the difference is shown as unattributed session usage, without inventing a model or turn.
+
 For Copilot CLI records, `events.jsonl` remains the traceable source while SQLite supplies precise credits and timing. Open a row's source popover and choose **Open** to jump to the matching JSONL event line in VS Code.
 
 ![Records table with privacy mask on](design/dashboard-records.jpg)
+
+### Historical requests
+
+The [legacy request-era](https://docs.github.com/en/copilot/concepts/billing/copilot-requests) sheet counts VS Code request entries and CLI model calls (`requests.count`) separately. Each source's date range ends at its last observed historical record. Counts are not model-weighted, converted to money, or added to AI credits. When the original count cannot be recovered, previously exported values are shown for audit only. Repeated CLI shutdown summaries for the same session start and unit are not added together.
 
 ### Sidebar filters
 
@@ -168,6 +178,17 @@ Export JSON for automation, skip the HTML:
 gh-usage --format json --output .\reports\copilot-usage.json --no-html
 ```
 
+### Effort timeline and audit export
+
+The HTML report includes the **Effort time** sheet by default. Drag the overview to select or move a range, or drag its handles to resize it. Effort supports **Year** (monthly totals), **Month** (calendar), **Week** (Monday–Sunday), and **Day** (48 half-hour slots), all in Beijing time (UTC+08:00). Select a day or occupied slot to inspect the underlying submissions without changing the range totals. Pass `--no-effort` to omit the sheet and its data. Merged usage CSVs have no human submission timestamps, so merged HTML does not infer effort.
+
+- **Month:** bar length is the share of a 24-hour day. Daily effort is green below 4 hours, yellow from 4 to under 8, orange from 8 to under 12, and red at 12 hours or more.
+- **Week:** the total is green below 30 hours, yellow from 30 to under 50, and red at 50 hours or more. The half-hour cells still show the number of submissions.
+
+Use `gh-usage --since-days 7 --effort-report effort.md` to also write a Markdown report. It reads stored local VS Code submissions and Copilot CLI user events, even without recorded credits. Across the scanned projects and sessions, any number of human submissions in the same Beijing-time clock half-hour count as one slot (0.5 effort hours). The report includes source references, exclusions, daily slots, and occupied intervals. Automatic events, unlinked queue entries, cloud execution, and response time do not count. It does not infer business relevance or recover unavailable history. Use a new path to preserve earlier reports.
+
+Repeat `--effort-project <NAME>` to combine exact project names in the effort report. The calculation uses the union of their slots, and the credits export is unchanged. A project filter does not classify messages within a mixed-topic session.
+
 ### Merge reports from multiple machines
 
 Run `gh-usage` on each machine, collect the `copilot-usage-*.csv` files into one folder, then:
@@ -176,7 +197,7 @@ Run `gh-usage` on each machine, collect the `copilot-usage-*.csv` files into one
 gh-usage --merge .\shared\copilot-usage
 ```
 
-It reads every CSV, deduplicates records, and produces one combined report with a per-machine breakdown — handy for swapping machines, team reviews, or comparing your desktop against your laptop.
+It reads every CSV, deduplicates matching rows on the same machine, and produces independent current-usage and historical-request views. If an older CSV lacks a hostname, its `copilot-usage-<machine>.csv` filename supplies it. `credits` and `request_count` are separate fields; `unclassified_usage` is audit-only.
 
 Add `--view` to open the merged report immediately: `gh-usage --merge .\shared\copilot-usage --view`. Use `--html <PATH>` to override the merged HTML destination; relative paths are resolved from the current working directory.
 
@@ -184,7 +205,7 @@ Add `--view` to open the merged report immediately: `gh-usage --merge .\shared\c
 
 ## 📄 CSV fields
 
-Each row is one usage record. Common fields include machine name, local time, session title, source, model, credits spent, the raw credit details, and the source file and line number. The CSV includes a UTF-8 BOM by default so Windows Excel opens it cleanly (use `--no-bom` to turn it off).
+Each row is one source usage record. Alongside machine, time, session, model, and source file/line, `credits` holds AI credits, `request_count` holds original historical counts when available, and `unclassified_usage` preserves values for audit only. Do not add these fields together; compare historical counts within the same source. The CSV includes a UTF-8 BOM by default so Windows Excel opens it cleanly (use `--no-bom` to turn it off).
 
 ---
 
@@ -195,7 +216,7 @@ Each row is one usage record. Common fields include machine name, local time, se
 - It only reads files that exist locally; deleted history can't be recovered.
 - Turns without any valid cumulative credits or legacy credit details are skipped; unknown usage is not assumed to be free. Active turns can grow after a report is generated.
 - USD/CNY values are estimates for local analysis. Exchange rates are user-configurable, and GitHub's billing page remains authoritative.
-- Copilot CLI event JSONL is the primary trace. The session title comes from `workspace.yaml.name` (or the first real JSONL user message when unnamed), and `workspace.yaml.cwd` identifies the project. `session-store.db` contributes exact credits, duration, and turn metadata only when its usage row matches a JSONL response.
+- Copilot CLI event JSONL is the primary trace. The session title comes from `workspace.yaml.name` (or the first real JSONL user message when unnamed), and `workspace.yaml.cwd` identifies the project. `session-store.db` contributes exact credits, duration, and turn metadata only when its usage row matches a JSONL response or a `session.usage_record` event. Unmatched rows are reported in the terminal and not counted.
 - It uses your system's standard VS Code and Copilot CLI data directories by default, and supports custom paths.
 
 ---
@@ -209,6 +230,9 @@ Each row is one usage record. Common fields include machine name, local time, se
 --html <PATH>            Write the HTML report to a specific path
 --view, -v               Generate HTML and open it in the default browser
 --no-html                Do not generate the HTML report
+--effort-report <PATH>   Also write a Markdown report of local human effort slots
+--effort-project <NAME>  Limit the Markdown effort report to exact project names (repeatable)
+--no-effort              Omit the Effort time sheet and its data from HTML
 --merge [DIR]            Merge existing copilot-usage-*.csv files into one report
 --format csv|json        Choose the output format
 --hostname <NAME>        Override the machine name stored in records

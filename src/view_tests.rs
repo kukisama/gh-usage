@@ -89,6 +89,32 @@ fn merge_accepts_view_and_respects_custom_html() {
 }
 
 #[test]
+fn merge_keeps_machine_and_billing_units_independent() {
+    let root = super::tests::temporary_cli_root("merge-units");
+    let output = root.join("report.html");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/fixtures/merge-billing");
+    run_merge(&fixtures, false, false, Some(&output)).unwrap();
+    let html = std::fs::read_to_string(&output).unwrap();
+    let data = html.split_once("<script id=\"gh-usage-data\" type=\"application/json\">").unwrap().1
+        .split_once("</script>").unwrap().0;
+    let data: serde_json::Value = serde_json::from_str(data).unwrap();
+    let rows = data["records"].as_array().unwrap();
+    let history = data["history"].as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(history.len(), 3);
+    for (host, credits, requests) in [("desk", 30.0, 1), ("laptop", 10.0, 2)] {
+        assert_eq!(rows.iter().filter(|r| r["hostname"] == host).filter_map(|r| r["credits"].as_f64()).sum::<f64>(), credits);
+        assert_eq!(history.iter().filter(|r| r["hostname"] == host).filter_map(|r| r["request_count"].as_u64()).sum::<u64>(), requests);
+    }
+    let unknown = history.iter().find(|r| r["unclassified_usage"] == 4.0).unwrap();
+    assert_eq!(unknown["hostname"], "laptop");
+    assert_eq!(unknown["credits"], 0.0);
+    assert!(unknown["turn_index"].is_null());
+    assert!(data.get("effort").is_none());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn missing_report_is_not_sent_to_browser() {
     let root = super::tests::temporary_cli_root("missing-report");
     let error = open_path(&root.join("missing.html")).unwrap_err();

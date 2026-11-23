@@ -6,15 +6,15 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 
 use serde_json::{Value, json};
 use serde_json::value::RawValue;
 
 use super::{
-    ContextFields, FileScanResult, UsageRecord, display_model_id, format_local_time,
-    merge_context_from_object, parse_credit_details,
+    ContextFields, FileScanResult, UsageRecord, display_model_id, effort, format_local_time,
+    merge_context_from_object, parse_credit_details, parse_premium_details,
 };
 
 #[derive(Default)]
@@ -25,12 +25,31 @@ struct Session {
     history: Vec<Value>,
     identities: HashMap<String, usize>,
     active: HashSet<usize>,
+    peaks: HashMap<usize, (f64, u64)>,
+    pending: HashMap<String, Value>,
 }
 
 // Retain only billing and attribution fields, never prompts, tool results or
 // response text. Large parallel sessions otherwise consume excessive memory.
 fn relevant(path: &[Value]) -> bool {
     let key = |i: usize| path.get(i).and_then(Value::as_str);
+    if key(0) == Some("pendingRequests") {
+        return match path.len() {
+            1 => true,
+            _ if path[1].as_u64().is_none() => false,
+            2 => true,
+            3 => matches!(key(2), Some("id" | "request" | "sendOptions")),
+            4 => match key(2) {
+                Some("request") => matches!(key(3), Some("requestId" | "timestamp" | "message" | "isSystemInitiated" | "hiddenFromTranscript" | "systemInitiatedLabel" | "terminalExecutionId" | "requestSource")),
+                Some("sendOptions") => matches!(key(3), Some("isSystemInitiated" | "hideFromTranscript")),
+                _ => false,
+            },
+            _ => false,
+        };
+    }
+    if key(0) == Some("sessionCostInfo") {
+        return path.len() == 1 || path.len() == 2 && key(1) == Some("credits");
+    }
     match path.len() {
         0 => true,
         1 => matches!(key(0), Some("requests" | "sessionId" | "creationDate" | "customTitle" | "title")),
@@ -38,7 +57,8 @@ fn relevant(path: &[Value]) -> bool {
         2 => true,
         3 => matches!(key(2), Some(
             "requestId" | "responseId" | "modelId" | "agentId" | "timestamp"
-            | "sessionId" | "responseTimestamp" | "modelState" | "copilotCredits" | "elapsedMs" | "result"
+            | "sessionId" | "responseTimestamp" | "modelState" | "copilotCredits" | "sessionCopilotCredits" | "elapsedMs" | "result"
+            | "message" | "isSystemInitiated" | "hiddenFromTranscript" | "systemInitiatedLabel" | "terminalExecutionId" | "requestSource"
         )),
         4 => match key(2) {
             Some("modelState") => key(3) == Some("completedAt"),
@@ -63,6 +83,15 @@ fn relevant(path: &[Value]) -> bool {
 // contain JS strings with unpaired UTF-16 surrogates; unrelated text must not
 // prevent reading valid billing updates from the same journal.
 fn project_raw(raw: &RawValue, path: &mut Vec<Value>) -> serde_json::Result<Value> {
+    if path.last().and_then(Value::as_str) == Some("message") {
+        let text = raw.get().trim_start();
+        let fields = text.starts_with('{').then(|| serde_json::from_str::<HashMap<String, &RawValue>>(text)).transpose()?;
+        let message = fields.as_ref().and_then(|f| f.get("text")).map(|v| v.get().trim_start()).unwrap_or(text);
+        // Keep only a marker. A visible, terminal-linked completion message
+        // can be system-generated even when isSystemInitiated is false.
+        return Ok(if message.starts_with("\"[Terminal") { json!("terminal") }
+            else if message.starts_with('"') { json!("message") } else { Value::Null });
+    }
     match raw.get().trim_start().as_bytes().first() {
         Some(b'{') => {
             let fields: HashMap<String, &RawValue> = serde_json::from_str(raw.get())?;
@@ -126,6 +155,15 @@ fn project(value: &Value, path: &mut Vec<Value>, line: usize) -> Value {
             if path.len() == 2 && out.contains_key("copilotCredits") {
                 out.insert("_creditsLine".into(), json!(line));
             }
+            if (path.len() == 2 && path[0] == "requests" || path.len() == 3 && path[0] == "pendingRequests" && path[2] == "request") && out.contains_key("timestamp") {
+                out.insert("_requestLine".into(), json!(line));
+            }
+            if path.len() == 2 && out.contains_key("sessionCopilotCredits") {
+                out.insert("_sessionCreditsLine".into(), json!(line));
+            }
+            if path.len() == 1 && path[0] == "sessionCostInfo" && out.contains_key("credits") {
+                out.insert("_sessionCreditsLine".into(), json!(line));
+            }
             if path.len() == 3 && path[2] == "result" && out.contains_key("details") {
                 out.insert("_detailsLine".into(), json!(line));
             }
@@ -176,12 +214,14 @@ impl Session {
         if kind.is_none() && entry.get("requests").is_some_and(Value::is_array) {
             self.state = project(entry, &mut Vec::new(), line);
             self.remember_requests();
+            self.remember_pending();
             return true;
         }
         if kind == Some(0) {
             let Some(value) = entry.get("v").filter(|v| v.is_object()) else { return false };
             self.state = project(value, &mut Vec::new(), line);
             self.remember_requests();
+            self.remember_pending();
             return true;
         }
         let Some(path) = entry.get("k").and_then(Value::as_array) else { return false };
@@ -191,10 +231,11 @@ impl Session {
         let Some(node) = target(&mut self.state, path) else { return false };
         match kind {
             Some(1) => {
-                let Some(value) = entry.get("v") else { return false };
+                // Undefined object properties are omitted by JSON.stringify.
+                let value = entry.get("v").unwrap_or(&Value::Null);
                 *node = project(value, &mut path.clone(), line);
             }
-            Some(2) if path == &[json!("requests")] => {
+            Some(2) if path.len() == 1 && (path[0] == "requests" || path[0] == "pendingRequests") => {
                 if node.is_null() {
                     *node = json!([]);
                 }
@@ -214,7 +255,7 @@ impl Session {
                 // kind 2 replaces the array tail from i; without i it appends.
                 array.truncate(index);
                 for (offset, value) in values.iter().enumerate() {
-                    array.push(project(value, &mut vec![json!("requests"), json!(index + offset)], line));
+                    array.push(project(value, &mut vec![path[0].clone(), json!(index + offset)], line));
                 }
             }
             _ => return false,
@@ -230,15 +271,34 @@ impl Session {
         {
             result["_detailsLine"] = json!(line);
         }
-        self.remember_requests();
+        if path.len() == 3 && (path[2] == "timestamp" || path[2] == "sessionCopilotCredits")
+            && let Some(request) = target(&mut self.state, &path[..2]) {
+            request[if path[2] == "timestamp" { "_requestLine" } else { "_sessionCreditsLine" }] = json!(line);
+        }
+        if path.len() == 2 && path[0] == "sessionCostInfo" && path[1] == "credits" {
+            self.state["sessionCostInfo"]["_sessionCreditsLine"] = json!(line);
+        }
+        if path.first().is_some_and(|v| v == "pendingRequests") {
+            self.remember_pending();
+        } else {
+            self.remember_requests();
+        }
         true
     }
 
+    fn remember_pending(&mut self) {
+        let Some(entries) = self.state.get("pendingRequests").and_then(Value::as_array) else { return };
+        for entry in entries {
+            let Some(id) = entry.pointer("/request/requestId").or_else(|| entry.get("id")).and_then(Value::as_str) else { continue };
+            self.pending.entry(id.to_owned()).or_insert_with(|| entry.clone());
+        }
+    }
+
     fn remember_requests(&mut self) {
+        self.active.clear();
         let Some(requests) = self.state.get_mut("requests").and_then(Value::as_array_mut) else {
             return;
         };
-        self.active.clear();
         for (slot, request) in requests.iter_mut().enumerate() {
             if !request.is_object() {
                 continue;
@@ -266,9 +326,58 @@ impl Session {
                 self.history.len() - 1
             });
             request["_ledgerKey"] = json!(key);
+            if let Some(credits) = valid_credits(request.get("copilotCredits")) {
+                let previous = self.peaks.entry(index).or_default();
+                if credits >= previous.0 {
+                    *previous = (credits, request.get("_creditsLine").and_then(Value::as_u64).unwrap_or(1));
+                }
+            }
             self.history[index] = request.clone();
             self.active.insert(index);
         }
+    }
+
+    fn effort_events(&self, path: &Path, project: Option<&str>) -> Vec<effort::Event> {
+        let session = self.state.get("sessionId").and_then(Value::as_str)
+            .or_else(|| path.file_stem().and_then(|s| s.to_str())).unwrap_or_default();
+        let event = |r: &Value, pending: Option<&Value>| {
+            let automatic = ["isSystemInitiated", "hiddenFromTranscript"].iter().any(|k| r.get(k).and_then(Value::as_bool) == Some(true))
+                || ["systemInitiatedLabel", "requestSource"].iter().any(|k| r.get(k).and_then(Value::as_str).is_some_and(|s| !s.is_empty()))
+                || r.get("message").and_then(Value::as_str) == Some("terminal") && r.get("terminalExecutionId").and_then(Value::as_str).is_some()
+                || pending.is_some_and(|p| ["/sendOptions/isSystemInitiated", "/sendOptions/hideFromTranscript"].iter()
+                    .any(|k| p.pointer(k).and_then(Value::as_bool) == Some(true)));
+            effort::Event {
+                source: "VS Code", session: session.to_owned(),
+                id: r.get("requestId").and_then(Value::as_str).or_else(|| pending.and_then(|p| p.get("id").and_then(Value::as_str))).map(ToOwned::to_owned),
+                project: project.map(ToOwned::to_owned),
+                timestamp_ms: r.get("timestamp").and_then(Value::as_i64).filter(|&t| t > 0),
+                file: path.to_path_buf(),
+                line: r.get("_requestLine").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()).unwrap_or(1),
+                kind: if automatic { effort::Kind::Automatic } else if pending.is_some() { effort::Kind::Queued }
+                    else if r.get("message").and_then(Value::as_str).is_some() { effort::Kind::Human } else { effort::Kind::Unverified },
+            }
+        };
+        let mut used = HashSet::new();
+        let mut events = Vec::new();
+        for request in self.history.iter().filter(|r| r.is_object()) {
+            let mut submission = event(request, None);
+            if let Some(id) = request.get("requestId").and_then(Value::as_str)
+                && let Some(pending) = self.pending.get(id)
+                && let Some(r) = pending.get("request") {
+                used.insert(id);
+                let queued = event(r, Some(pending));
+                if queued.kind == effort::Kind::Automatic {
+                    submission.kind = effort::Kind::Automatic;
+                } else if queued.timestamp_ms.is_some() {
+                    submission.timestamp_ms = queued.timestamp_ms;
+                    submission.line = queued.line;
+                }
+            }
+            events.push(submission);
+        }
+        events.extend(self.pending.iter().filter(|(id, _)| !used.contains(id.as_str()))
+            .filter_map(|(_, p)| Some(event(p.get("request")?, Some(p)))));
+        events
     }
 
     fn records(&self, path: &Path, project: Option<String>) -> Vec<UsageRecord> {
@@ -277,13 +386,19 @@ impl Session {
         let title = self.state.get("customTitle").and_then(Value::as_str)
             .or_else(|| self.state.get("title").and_then(Value::as_str))
             .map(str::trim).filter(|s| !s.is_empty());
-        requests.iter().enumerate().filter_map(|(index, request)| {
+        let mut records: Vec<_> = requests.iter().enumerate().filter_map(|(index, request)| {
             let object = request.as_object()?;
             let result = request.get("result");
             let details = result.and_then(|v| v.get("details")).and_then(Value::as_str);
             let parsed = details.and_then(parse_credit_details);
-            let cumulative = request.get("copilotCredits").and_then(Value::as_f64)
-                .filter(|v| v.is_finite() && *v >= 0.0);
+            let premium = details.and_then(parse_premium_details);
+            let latest = valid_credits(request.get("copilotCredits"));
+            // A continued turn can replace the progress total with a smaller
+            // partial report. Without a final footer preserve observed credits,
+            // but do not sum progress updates or override a valid final result.
+            let retained = parsed.is_none().then(|| self.peaks.get(&index).copied()).flatten()
+                .filter(|(peak, _)| *peak > latest.unwrap_or_default());
+            let cumulative = retained.map(|(c, _)| c).or(latest);
             // Some versions/continued requests persist a partial context-widget
             // total even though the final result contains a larger turn total.
             // These are overlapping totals: choose the more complete one, never
@@ -294,8 +409,9 @@ impl Session {
             let credits = if use_cumulative {
                 cumulative?
             } else {
-                parsed.as_ref().map(|(_, c)| *c)?
+                parsed.as_ref().map(|(_, c)| *c).or_else(|| premium.as_ref().map(|_| 0.0))?
             };
+            let request_count = (!use_cumulative && parsed.is_none() && premium.is_some()).then_some(1);
             let mut context = ContextFields::default();
             // Prefer the extension's final response ID for legacy compatibility.
             if let Some(metadata) = result.and_then(|v| v.get("metadata")).and_then(Value::as_object) {
@@ -310,11 +426,15 @@ impl Session {
                 .or(context.timestamp_ms)
                 .or_else(|| self.state.get("creationDate").and_then(Value::as_i64));
             let model_id = context.model_id.as_deref().map(display_model_id);
-            let model = parsed.as_ref().map(|(m, _)| m.clone())
+            let model = parsed.as_ref().or(premium.as_ref()).map(|(m, _)| m.clone())
                 .or_else(|| model_id.clone()).unwrap_or_else(|| "Unknown".into());
             let (mut details, line) = if use_cumulative {
-                (format!("{model} • {credits} credits (cumulative, includes subagents)"),
-                 request.get("_creditsLine").and_then(Value::as_u64))
+                if let Some((_, line)) = retained {
+                    (format!("{model} • {credits} credits (largest recorded cumulative total; no final details)"), Some(line))
+                } else {
+                    (format!("{model} • {credits} credits (cumulative, includes subagents)"),
+                     request.get("_creditsLine").and_then(Value::as_u64))
+                }
             } else {
                 (details.unwrap_or_default().to_owned(),
                  result.and_then(|v| v.get("_detailsLine")).and_then(Value::as_u64))
@@ -331,6 +451,9 @@ impl Session {
                 model,
                 model_id,
                 credits,
+                request_count,
+                premium_requests: None,
+                unclassified_usage: None,
                 details,
                 session_id: session_id.map(ToOwned::to_owned).or(context.session_id)
                     .or_else(|| path.file_stem().and_then(|s| s.to_str()).map(ToOwned::to_owned)),
@@ -346,27 +469,61 @@ impl Session {
                 file: path.to_string_lossy().into_owned(),
                 line: line.and_then(|l| usize::try_from(l).ok()).unwrap_or(1),
             })
-        }).collect()
+        }).collect();
+        let aggregate = self.state.get("sessionCostInfo").into_iter()
+            .filter_map(|v| Some((valid_credits(v.get("credits"))?, v.get("_sessionCreditsLine").and_then(Value::as_u64), None)))
+            .chain(self.active.iter().filter_map(|&index| {
+                let request = self.history.get(index)?;
+                Some((valid_credits(request.get("sessionCopilotCredits"))?, request.get("_sessionCreditsLine").and_then(Value::as_u64), request.get("timestamp").and_then(Value::as_i64)))
+            })).max_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        if let Some((total, line, timestamp)) = aggregate {
+            let observed = records.iter().map(|r| r.credits).sum::<f64>();
+            let remainder = total - observed;
+            if remainder > 0.00000001 {
+                let timestamp_ms = timestamp.or_else(|| records.iter().filter_map(|r| r.timestamp_ms).max())
+                    .or_else(|| self.state.get("creationDate").and_then(Value::as_i64));
+                records.push(UsageRecord {
+                    source: "vscode.sessionCost".into(), hostname: String::new(), timestamp_ms,
+                    local_time_hint: timestamp_ms.and_then(format_local_time), chat_title: title.map(ToOwned::to_owned),
+                    model: "Unattributed".into(), model_id: None, credits: remainder,
+                    request_count: None,
+                    premium_requests: None,
+                    unclassified_usage: None,
+                    details: format!("VS Code session aggregate: {total} credits; {observed} already attributed to turns"),
+                    session_id: session_id.map(ToOwned::to_owned).or_else(|| path.file_stem().and_then(|s| s.to_str()).map(ToOwned::to_owned)),
+                    request_id: None, response_id: None, agent_id: None, project, duration_ms: None,
+                    turn_index: None, session_total: None,
+                    file: path.to_string_lossy().into_owned(), line: line.and_then(|l| usize::try_from(l).ok()).unwrap_or(1),
+                });
+            }
+        }
+        records
     }
 }
 
-pub(super) fn scan(path: &Path, project: Option<String>) -> FileScanResult {
+fn valid_credits(value: Option<&Value>) -> Option<f64> {
+    value.and_then(Value::as_f64).filter(|v| v.is_finite() && *v >= 0.0)
+}
+
+pub(super) fn scan(path: &Path, project: Option<String>, collect_effort: bool) -> FileScanResult {
     let mut result = FileScanResult::default();
     let Ok(file) = File::open(path) else {
         result.parse_errors += 1;
         return result;
     };
     let mut session = Session::default();
-    for line in BufReader::with_capacity(1024 * 1024, file).split(b'\n') {
+    let mut reader = BufReader::with_capacity(1024 * 1024, file);
+    let mut apply = |line: std::io::Result<Vec<u8>>| {
         result.scanned_lines += 1;
         let Ok(line) = line else {
             result.parse_errors += 1;
-            break;
+            return false;
         };
+        let line = line.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&line);
         if line.iter().all(u8::is_ascii_whitespace) {
-            continue;
+            return true;
         }
-        match parse_entry(&line) {
+        match parse_entry(line) {
             Ok(None) => {}
             Ok(Some(value)) => {
                 result.json_candidate_lines += 1;
@@ -380,7 +537,17 @@ pub(super) fn scan(path: &Path, project: Option<String>) -> FileScanResult {
                 eprintln!("warning: invalid VS Code journal at {}:{}: {error}", path.display(), result.scanned_lines);
             }
         }
+        true
+    };
+    if path.extension().is_some_and(|ext| ext == "json") {
+        let mut bytes = Vec::new();
+        apply(reader.read_to_end(&mut bytes).map(|_| bytes));
+    } else {
+        for line in reader.split(b'\n') {
+            if !apply(line) { break }
+        }
     }
+    if collect_effort { result.effort = session.effort_events(path, project.as_deref()); }
     result.records = session.records(path, project);
     result
 }
@@ -398,7 +565,7 @@ mod tests {
         let path = dir.join("session.jsonl");
         let text = entries.iter().map(Value::to_string).collect::<Vec<_>>().join("\n");
         fs::write(&path, text).unwrap();
-        let result = scan(&path, Some("project".into()));
+        let result = scan(&path, Some("project".into()), true);
         fs::remove_dir_all(dir).unwrap();
         result
     }
@@ -431,6 +598,53 @@ mod tests {
         assert_eq!(r.model_id.as_deref(), Some("gpt-6-astra"));
         assert_eq!(r.timestamp_ms, Some(9000));
         assert_eq!(r.project.as_deref(), Some("project"));
+    }
+
+    #[test]
+    fn preserves_reported_credits_when_unfinished_turn_total_drops() {
+        let result = scan_entries(&[
+            json!({"kind":0,"v":{"requests":[{"requestId":"unfinished","modelId":"copilot/gpt-6.1-sol","copilotCredits":3.56761},
+                {"requestId":"finished","modelId":"copilot/gpt-6.2-sol","copilotCredits":50.0}]}}),
+            json!({"kind":1,"k":["requests",0,"copilotCredits"],"v":0.102067}),
+            json!({"kind":1,"k":["requests",1,"copilotCredits"],"v":2.0}),
+            json!({"kind":1,"k":["requests",1,"result"],"v":{"details":"GPT-6.2 • 11.0 credits"}}),
+        ]);
+        assert_eq!(result.records.iter().map(|r| (r.credits, r.line)).collect::<Vec<_>>(), vec![(3.56761, 1), (11.0, 4)]);
+    }
+
+    #[test]
+    fn counts_only_the_unattributed_remainder_of_session_usage() {
+        let mut result = scan_entries(&[
+            json!({"kind":0,"v":{"sessionId":"accounting","requests":[{"requestId":"one","copilotCredits":12.0,"sessionCopilotCredits":20.0}]}}),
+            json!({"kind":1,"k":["sessionCostInfo"],"v":{"credits":25.0,"status":"complete"}}),
+            json!({"kind":2,"k":["requests"],"v":[{"requestId":"two","copilotCredits":10.0,"sessionCopilotCredits":29.0}]}),
+            json!({"kind":1,"k":["sessionCostInfo"],"v":{"credits":30.0}}),
+            json!({"kind":1,"k":["sessionCostInfo"]}),
+        ]);
+        super::super::assign_turn_indices(&mut result.records);
+        assert_eq!(result.parse_errors, 0);
+        assert_eq!(result.records.iter().map(|r| r.credits).sum::<f64>(), 29.0);
+        let remainder = result.records.last().unwrap();
+        assert_eq!((remainder.credits, remainder.line, remainder.turn_index, remainder.session_total), (7.0, 3, None, None));
+        assert_eq!(remainder.source, "vscode.sessionCost");
+    }
+
+    #[test]
+    fn effort_uses_request_time_and_excludes_visible_automatic_requests() {
+        let result = scan_entries(&[
+            json!({"kind":0,"v":{"sessionId":"effort","requests":[
+                {"requestId":"manual","timestamp":1000,"responseTimestamp":99999,"message":{"text":"private"}},
+                {"requestId":"terminal","timestamp":2000,"message":{"text":"[Terminal completed]"},"terminalExecutionId":"job","isSystemInitiated":false,"copilotCredits":1},
+                {"requestId":"missing","message":"legacy","responseTimestamp":5000}
+            ]}}),
+            json!({"kind":2,"k":["pendingRequests"],"v":[{"id":"queued","request":{"requestId":"queued","timestamp":3000,"message":{"text":"private"}}}]}),
+            json!({"kind":2,"k":["pendingRequests"],"i":0}),
+        ]);
+        assert_eq!(result.parse_errors, 0);
+        assert_eq!(result.records.len(), 1);
+        let shape = result.effort.iter().map(|event| (event.id.as_deref(), event.timestamp_ms, event.kind, event.line)).collect::<Vec<_>>();
+        assert_eq!(shape, vec![(Some("manual"), Some(1000), effort::Kind::Human, 1), (Some("terminal"), Some(2000), effort::Kind::Automatic, 1),
+            (Some("missing"), None, effort::Kind::Human, 1), (Some("queued"), Some(3000), effort::Kind::Queued, 2)]);
     }
 
     #[test]
@@ -475,6 +689,20 @@ mod tests {
         assert_eq!(result.records[0].line, 3);
         assert_eq!(result.records[1].credits, 2.0);
         assert!(parse_credit_details("GPT-Test • 1 credit").is_some());
+    }
+
+    #[test]
+    fn legacy_multiplier_is_not_a_credit_or_part_of_session_credit_remainder() {
+        let result = scan_entries(&[json!({"kind":0,"v":{"sessionId":"mixed-plan",
+            "sessionCostInfo":{"credits":9}, "requests":[
+                {"requestId":"legacy","result":{"details":"GPT-Test • 1x"}},
+                {"requestId":"fraction","result":{"details":"GPT-Test • 0.33×"}},
+                {"requestId":"included","result":{"details":"GPT-Test • 0x"}},
+                {"requestId":"metered","copilotCredits":4,"result":{"details":"GPT-Test • 1x"}}
+            ]}})]);
+        assert_eq!(result.records.iter().map(|r| r.request_count).collect::<Vec<_>>(),
+            vec![Some(1), Some(1), Some(1), None, None]);
+        assert_eq!(result.records.iter().map(|r| r.credits).collect::<Vec<_>>(), vec![0.0, 0.0, 0.0, 4.0, 5.0]);
     }
 
     #[test]

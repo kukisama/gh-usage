@@ -1,0 +1,4 @@
+source,timestamp_ms,model,credits,request_count,session_id,turn_index,file,line,details
+vscode.chatSessions,1784890800000,GPT-Test,10,,shared-id,1,chat.jsonl,1,
+vscode.chatSessions,1776420000000,GPT-Test,0,2,legacy-id,1,chat.jsonl,2,
+copilot.cli.events,1776420000000,old-model,4,,older-cli,,events.jsonl,9,Copilot CLI old-model (legacy session shutdown) • 4 credits

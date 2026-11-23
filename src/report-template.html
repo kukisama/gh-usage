@@ -317,6 +317,7 @@
   .col-filter .cf-list label:hover { background: var(--bg-elev2); }
   .col-filter .cf-list .cf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .col-filter .cf-list .cf-count { margin-left: auto; color: var(--text-dim); font-size: 11px; }
+__GH_USAGE_EFFORT_STYLE__
 </style>
 </head>
 <body>
@@ -394,8 +395,8 @@
       <div id="date-range" style="font-size:11px;color:var(--text-dim);">—</div>
     </div>
 
-    <h2 data-i18n="aside.pricing">Billing estimate</h2>
-    <div class="billing-settings">
+    <h2 id="pricing-heading" data-i18n="aside.pricing">Billing estimate</h2>
+    <div id="pricing-panel" class="billing-settings">
       <label class="toggle-row">
         <input type="checkbox" id="cost-toggle">
         <span data-i18n="pricing.enable">Show estimated cost</span>
@@ -423,8 +424,29 @@
     </div>
   </aside>
 
-  <section class="section">
-    <div id="filter-bar" class="filter-bar"></div>
+  <section class="section report-workspace">
+    <div class="workspace-header">
+      <section class="card time-nav" aria-labelledby="time-nav-title">
+        <div class="workspace-line"><h3 id="time-nav-title" data-i18n="sheet.history">Full timeline</h3>
+          <span id="time-range-label" class="time-caption" aria-live="polite"></span>
+          <button class="pg-btn" type="button" id="time-reset" data-i18n="sheet.full"></button></div>
+        <div id="time-track" class="time-track" data-i18n-attr='{"aria-label":"sheet.history"}' role="group">
+          <div id="time-spark" aria-hidden="true"></div>
+          <div id="time-window" class="time-window">
+            <button type="button" data-grip="start" data-i18n-attr='{"aria-label":"sheet.start","title":"sheet.start"}'></button>
+            <button type="button" data-grip="end" data-i18n-attr='{"aria-label":"sheet.end","title":"sheet.end"}'></button>
+          </div>
+        </div>
+        <div class="workspace-line time-foot"><span id="time-ticks"></span><span data-i18n="sheet.brushHint"></span></div>
+      </section>
+      <div id="filter-bar" class="filter-bar"></div>
+      <div id="sheet-tabs" class="sheet-tabs" role="tablist" data-i18n-attr='{"aria-label":"sheet.views"}'>
+        <button id="sheet-tab-usage" type="button" role="tab" aria-selected="true" aria-controls="usage-panel" data-sheet="usage" data-i18n="sheet.usage"></button>
+        <button id="sheet-tab-effort" type="button" role="tab" aria-selected="false" aria-controls="effort-panel" data-sheet="effort" data-i18n="sheet.effort" hidden></button>
+        <button id="sheet-tab-history" type="button" role="tab" aria-selected="false" aria-controls="history-panel" data-sheet="history" data-i18n="history.title" hidden></button>
+      </div>
+    </div>
+    <section id="usage-panel" class="sheet-panel" role="tabpanel" aria-labelledby="sheet-tab-usage">
     <div class="kpi-row">
       <div class="kpi">
         <div class="label" id="kpi-total-label" data-i18n="kpi.total">Total credits</div>
@@ -458,33 +480,28 @@
       </div>
     </div>
 
-    <div class="grid-2" style="margin-bottom:18px;">
+    <div class="grid-2 usage-grid">
       <div class="card">
         <h3 id="daily-chart-title" data-i18n="charts.daily">Daily credits (stacked by machine)</h3>
         <div id="daily-chart"></div>
         <div id="daily-legend" class="legend"></div>
+        <button type="button" class="pg-btn cross-link" data-jump-sheet="effort" data-i18n="sheet.toEffort" hidden></button>
       </div>
       <div class="card">
-        <h3 data-i18n="charts.byModel">By model</h3>
+        <div class="segmented" id="usage-breakdown" role="group" data-i18n-attr='{"aria-label":"sheet.breakdown"}'>
+          <button type="button" data-breakdown="model" data-i18n="cols.model"></button>
+          <button type="button" data-breakdown="project" data-i18n="cols.project"></button>
+          <button type="button" data-breakdown="machine" data-i18n="cols.machine"></button>
+        </div>
+        <div id="breakdown-model" class="breakdown-pane">
         <div id="model-chart"></div>
         <div id="model-legend" class="legend" style="flex-direction:column;gap:4px;"></div>
-      </div>
-    </div>
-
-    <div class="grid-2" style="margin-bottom:18px;">
-      <div class="card">
-        <h3 data-i18n="charts.byProject">By project</h3>
+        </div>
+        <div id="breakdown-project" class="breakdown-pane" hidden>
         <div id="project-chart"></div>
         <div id="project-legend" class="legend"></div>
-      </div>
-      <div class="card">
-        <h3 data-i18n="charts.topSessions">Top sessions</h3>
-        <div id="top-sessions"></div>
-      </div>
-    </div>
-
-    <div class="card" style="margin-bottom:18px;">
-      <h3 data-i18n="tables.byMachine">By machine</h3>
+        </div>
+        <div id="breakdown-machine" class="breakdown-pane" hidden>
       <table>
         <thead>
           <tr>
@@ -498,12 +515,69 @@
         </thead>
         <tbody id="by-machine-body"></tbody>
       </table>
+        </div>
+        <details class="usage-sessions"><summary data-i18n="charts.topSessions"></summary><div id="top-sessions"></div></details>
+      </div>
     </div>
+    </section>
 
-    <div class="card">
-      <h3 data-i18n="tables.records">Session turns</h3>
+    <section id="effort-panel" class="sheet-panel" role="tabpanel" aria-labelledby="sheet-tab-effort" hidden>
+      <div class="effort-heading">
+        <div><span class="effort-kicker" data-i18n="effort.kicker"></span><h3 data-i18n="effort.title"></h3></div>
+        <div class="effort-tools">
+          <select id="effort-project-filter" data-i18n-attr='{"aria-label":"effort.projectFilter"}'></select>
+          <select id="effort-source-filter" data-i18n-attr='{"aria-label":"effort.sourceFilter"}'></select>
+        </div>
+      </div>
+      <p class="effort-note" data-i18n="effort.rule"></p>
+      <div id="effort-metrics" class="effort-metrics"></div>
+      <div class="effort-layout">
+        <div class="effort-plot">
+          <div class="effort-heading effort-toolbar">
+            <div class="segmented" id="effort-scales" role="group" data-i18n-attr='{"aria-label":"effort.scale"}'>
+              <button type="button" data-scale="year" data-i18n="effort.year"></button>
+              <button type="button" data-scale="month" data-i18n="effort.month"></button>
+              <button type="button" data-scale="week" data-i18n="effort.week"></button>
+              <button type="button" data-scale="day" data-i18n="effort.day"></button>
+            </div>
+            <div class="effort-tools"><button type="button" class="pg-btn" data-step="-1" data-i18n-attr='{"aria-label":"effort.prev","title":"effort.prev"}'>←</button>
+              <span id="effort-period"></span>
+              <button type="button" class="pg-btn" data-step="1" data-i18n-attr='{"aria-label":"effort.next","title":"effort.next"}'>→</button></div>
+          </div>
+          <div id="effort-grid" class="effort-scroll" role="region" tabindex="0" data-i18n-attr='{"aria-label":"effort.title"}'></div>
+          <div id="effort-nav" class="effort-nav"></div>
+        </div>
+        <div class="effort-projects">
+          <div id="effort-inspector"></div>
+          <details class="usage-sessions"><summary data-i18n="effort.projectRank"></summary>
+            <div id="effort-project-rank"></div><p class="effort-note" data-i18n="effort.overlap"></p></details>
+        </div>
+      </div>
+    </section>
+
+    <section id="history-panel" class="sheet-panel" role="tabpanel" aria-labelledby="sheet-tab-history" hidden>
+      <div class="workspace-line"><h3 data-i18n="history.title"></h3><span id="history-coverage" class="time-caption"></span></div>
+      <p class="usage-note" data-i18n="history.note"></p>
+      <div class="segmented" id="history-sources" role="group" data-i18n-attr='{"aria-label":"cols.source"}'></div>
+      <div id="history-summary" class="kpi-row"></div>
+      <div id="history-months" class="year-board history-months"></div>
+      <div id="history-machines" class="workspace-line history-machines"></div>
+      <h4 id="history-detail-heading"></h4>
+      <div class="detail-table"><table id="history-table"><thead></thead><tbody></tbody></table></div>
+      <div id="history-pages" class="effort-nav"></div>
+    </section>
+
+    <details id="related-drawer" class="card related-drawer">
+      <summary><b data-i18n="sheet.details"></b><span id="related-context"></span></summary>
+      <div class="segmented" id="detail-tabs" role="group" data-i18n-attr='{"aria-label":"sheet.details"}'>
+        <button type="button" data-detail="usage" data-i18n="tables.records"></button>
+        <button type="button" data-detail="effort" data-i18n="effort.drill" hidden></button>
+      </div>
+      <div id="detail-usage" class="detail-pane">
+      <details class="usage-rules"><summary data-i18n="sheet.rules"></summary>
       <p class="usage-note" data-i18n="usage.turnScope">One row per user exchange, not per tool or agent call. Credits include the turn's recorded subtask usage; child calls are not added again. Active turns may continue to grow.</p>
       <p class="usage-note" data-i18n="usage.compatibility">New logs use cumulative credits, old logs use result details; overlapping totals are reconciled, never summed. Model labels describe the turn, not a separate subagent bill. Legacy session-only summaries remain summaries.</p>
+      </details>
       <div class="toolbar">
         <input id="filter" type="search"
                data-i18n-attr='{"placeholder":"toolbar.filter"}'
@@ -522,7 +596,7 @@
         </select>
         <span class="count" id="records-count"></span>
       </div>
-      <table id="records-table">
+      <div class="detail-table"><table id="records-table">
         <thead id="records-head">
           <tr>
             <th data-col="time"></th>
@@ -537,9 +611,11 @@
           </tr>
         </thead>
         <tbody id="records-body"></tbody>
-      </table>
+      </table></div>
       <div id="pagination" class="toolbar" style="margin-top:12px;justify-content:flex-end;"></div>
-    </div>
+      </div>
+      <div id="effort-detail" class="detail-pane" hidden></div>
+    </details>
   </section>
 </main>
 
@@ -647,7 +723,7 @@
       "kpi.timedExchanges": "{n} timed exchange(s)",
       "kpi.perExchangeHint": "wall-clock per exchange",
       "charts.byProject": "By project (click to filter)",
-      "charts.topSessions": "Top sessions by credits",
+      "charts.topSessions": "Highest-usage sessions",
       "charts.noProject": "(no project)",
       "charts.clickHint": "click to filter",
       "cols.project": "Project",
@@ -764,7 +840,7 @@
       "kpi.timedExchanges": "{n} 次有耗时记录",
       "kpi.perExchangeHint": "每次沟通墙钟时间",
       "charts.byProject": "按项目分布（点击筛选）",
-      "charts.topSessions": "顶部会话（按积分）",
+      "charts.topSessions": "高用量会话",
       "charts.noProject": "（无项目）",
       "charts.clickHint": "点击筛选",
       "cols.project": "项目",
@@ -831,18 +907,24 @@
   // CLI exports can contain several model aggregates for the same user turn.
   // Present a single turn without changing their total or counting concurrent
   // model durations twice. CSV/JSON source records remain available for audit.
+  function billingKind(r) {
+    return r.request_count != null ? "requests" : r.unclassified_usage != null ? "unclassified" : "credits";
+  }
+  function billingNumber(r) {
+    return Number(r.request_count ?? r.unclassified_usage ?? r.credits) || 0;
+  }
   function aggregateReportTurns(input, primaryHost) {
     const groups = new Map();
     for (const [index, r] of input.entries()) {
-      const key = r.session_id && r.turn_index != null
-        ? JSON.stringify([r.hostname || primaryHost || "unknown-host", r.source, r.session_id, r.turn_index])
+      const key = r.session_id && r.turn_index != null && billingKind(r) !== "unclassified"
+        ? JSON.stringify([r.hostname || primaryHost || "unknown-host", r.source, r.session_id, r.turn_index, billingKind(r)])
         : `summary:${index}`;
       let group = groups.get(key);
       if (!group) {
-        group = { row: { ...r, credits: 0 }, models: new Set(), start: Infinity, end: -Infinity, duration: 0 };
+        group = { row: { ...r }, amount: 0, models: new Set(), start: Infinity, end: -Infinity, duration: 0 };
         groups.set(key, group);
       }
-      group.row.credits += Number(r.credits) || 0;
+      group.amount += billingNumber(r);
       if (r.model) group.models.add(r.model);
       if (r.session_total != null) group.row.session_total = Math.max(group.row.session_total || 0, r.session_total);
       if (r.timestamp_ms != null) group.row.timestamp_ms = Math.max(group.row.timestamp_ms ?? r.timestamp_ms, r.timestamp_ms);
@@ -856,6 +938,9 @@
     }
     return Array.from(groups.values(), group => ({
       ...group.row,
+      credits: billingKind(group.row) === "credits" ? group.amount : 0,
+      request_count: billingKind(group.row) === "requests" ? group.amount : null,
+      unclassified_usage: billingKind(group.row) === "unclassified" ? group.amount : null,
       model: Array.from(group.models).sort().join(" + "),
       model_id: group.models.size > 1 ? null : group.row.model_id,
       duration_ms: Math.max(group.duration, Number.isFinite(group.start) ? group.end - group.start : 0) || null
@@ -865,20 +950,23 @@
   const PALETTE = ["#58a6ff", "#d2a8ff", "#3fb950", "#d29922", "#f85149", "#79c0ff", "#ff7b72", "#a5d6ff", "#56d364", "#ffa657"];
   const RAW = JSON.parse(document.getElementById("gh-usage-data").textContent);
   const RECORDS = aggregateReportTurns((RAW && RAW.records) ? RAW.records : [], RAW.primaryHost);
-  const HOSTS = Array.from(new Set(RECORDS.map(r => r.hostname || RAW.primaryHost || "unknown-host"))).sort();
+  const HISTORY = Array.isArray(RAW.history) ? RAW.history : [];
+  const EFFORT_HOST = RAW.primaryHost || "unknown-host";
+  const EFFORT_EVENTS = Array.isArray(RAW.effort) ? RAW.effort : null;
+  const HOSTS = Array.from(new Set([...RECORDS.map(r => r.hostname || EFFORT_HOST), ...HISTORY.map(r => r.hostname || EFFORT_HOST), ...(EFFORT_EVENTS?.length ? [EFFORT_HOST] : [])])).sort();
   const HOST_COLOR = Object.fromEntries(HOSTS.map((h, i) => [h, PALETTE[i % PALETTE.length]]));
   const SOURCES = Array.from(new Set(RECORDS.map(r => r.source))).sort();
   const MODELS = Array.from(new Set(RECORDS.map(r => r.model).filter(Boolean))).sort();
   const NO_PROJECT = "\u0000__noproject__";
   const projectOf = (r) => (r.project && String(r.project).trim()) ? r.project : NO_PROJECT;
-  const PROJECTS = Array.from(new Set(RECORDS.map(projectOf))).sort((a, b) => {
+  const PROJECTS = Array.from(new Set([...RECORDS.map(projectOf), ...HISTORY.map(projectOf), ...(EFFORT_EVENTS || []).map(projectOf)])).sort((a, b) => {
     if (a === NO_PROJECT) return 1;
     if (b === NO_PROJECT) return -1;
     return a.localeCompare(b);
   });
   const PROJECT_COLOR = Object.fromEntries(PROJECTS.map((p, i) => [p, PALETTE[i % PALETTE.length]]));
   const USD_PER_CREDIT = 0.01;
-  const RECORD_DAYS = Array.from(new Set(RECORDS.map(r => dayKey(r.timestamp_ms)).filter(Boolean))).sort();
+  const RECORD_DAYS = RECORDS.map(r => dayKey(r.timestamp_ms)).filter(Boolean).sort();
   const DATA_MIN_DAY = RECORD_DAYS[0] || "";
   const DATA_MAX_DAY = RECORD_DAYS[RECORD_DAYS.length - 1] || "";
 
@@ -945,7 +1033,7 @@
     model:    { num: false, filter: true,  label: "cols.model",     get: r => r.model || "",                        text: r => r.model || "" },
     session:  { num: false, filter: true,  label: "cols.session",   get: r => sessionName(r),                       text: r => sessionName(r) },
     round:    { num: true,  filter: false, label: "cols.round",     get: r => (r.turn_index != null ? r.turn_index : -1), text: r => (r.turn_index != null ? String(r.turn_index) : "") },
-    credits:  { num: true,  filter: false, label: "cols.turnCredits", get: r => r.credits || 0,                      text: r => fmtUsage(r.credits, 2) },
+    credits:  { num: true,  filter: false, label: "cols.turnCredits", get: billingNumber,                          text: r => fmtUsage(billingNumber(r), 2) },
     duration: { num: true,  filter: false, label: "cols.duration",  get: r => r.duration_ms || 0,                   text: r => fmtDuration(r.duration_ms) },
   };
   let SORT_KEY = "time";
@@ -956,11 +1044,11 @@
   function fmtNum(n, digits) {
     if (n == null || isNaN(n)) return "—";
     const d = digits == null ? (Math.abs(n) >= 100 ? 1 : 2) : digits;
-    return n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+    return n.toLocaleString(reportLocale(), { minimumFractionDigits: d, maximumFractionDigits: d });
   }
   function displayUsage(credits) {
     const value = Number(credits) || 0;
-    if (!COST_ENABLED) return value;
+    if (!showMoney()) return value;
     const usd = value * USD_PER_CREDIT;
     return COST_CURRENCY === "CNY" ? usd * CNY_PER_USD : usd;
   }
@@ -968,47 +1056,41 @@
     return fmtNum(displayUsage(credits), digits);
   }
   function usageUnit() {
-    if (!COST_ENABLED) return t("charts.credits");
+    if (!showMoney()) return t("ledger.credits");
     return COST_CURRENCY === "CNY" ? "CNY ¥" : "USD $";
   }
+  function showMoney() { return COST_ENABLED; }
+  function showUsageAmount(r) { return displayUsage(billingNumber(r)); }
   function parseDay(day) {
     if (!day) return null;
     const [y, m, d] = day.split("-").map(Number);
-    return new Date(y, m - 1, d, 12, 0, 0, 0);
+    return new Date(Date.UTC(y, m - 1, d));
   }
   function formatDay(date) {
     const pad = (n) => String(n).padStart(2, "0");
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
   }
   function offsetDay(day, days) {
     const date = parseDay(day);
     if (!date) return "";
-    date.setDate(date.getDate() + days);
+    date.setUTCDate(date.getUTCDate() + days);
     return formatDay(date);
   }
   function offsetMonth(day, months) {
     const date = parseDay(day);
     if (!date) return "";
-    const wantedDay = date.getDate();
-    date.setDate(1);
-    date.setMonth(date.getMonth() + months);
-    const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
-    date.setDate(Math.min(wantedDay, lastDay));
+    const wantedDay = date.getUTCDate();
+    date.setUTCDate(1);
+    date.setUTCMonth(date.getUTCMonth() + months);
+    const lastDay = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+    date.setUTCDate(Math.min(wantedDay, lastDay));
     return formatDay(date);
   }
   function dayKey(ms) {
-    if (ms == null) return null;
-    const d = new Date(ms);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
+    return reportDay(ms);
   }
   function fmtDateTime(ms) {
-    if (ms == null) return "—";
-    const d = new Date(ms);
-    const pad = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    return dayKey(ms) ? new Date(ms + REPORT_OFFSET_MS).toISOString().slice(0, 19).replace("T", " ") : "—";
   }
   function escapeHtml(s) {
     if (s == null) return "";
@@ -1023,6 +1105,7 @@
     const h = Math.floor(totalSec / 3600);
     const m = Math.floor((totalSec % 3600) / 60);
     const s = totalSec % 60;
+    if (CURRENT_LANG === "zh") return h ? `${h} 小时 ${m} 分` : m ? `${m} 分 ${s} 秒` : `${s} 秒`;
     if (h > 0) return `${h}h ${m}m`;
     if (m > 0) return `${m}m ${s}s`;
     return `${s}s`;
@@ -1068,18 +1151,19 @@
   // `skip` lets a visual ignore its own dimension so every category stays
   // visible while the active selection is highlighted (PowerBI cross-filter).
   function filteredRecords(skip) {
+    const skips = Array.isArray(skip) ? skip : [skip];
+    const include = name => !skips.includes(name);
     const needle = FILTER_TEXT.trim().toLowerCase();
     return RECORDS.filter(r => {
-      const host = r.hostname || "";
-      if (skip !== "host" && !SELECTED_HOSTS.has(host)) return false;
-      if (skip !== "project" && !SELECTED_PROJECTS.has(projectOf(r))) return false;
-      if (skip !== "source" && SELECTED_SOURCE && r.source !== SELECTED_SOURCE) return false;
-      if (skip !== "model" && SELECTED_MODEL && r.model !== SELECTED_MODEL) return false;
+      const host = r.hostname || EFFORT_HOST;
+      if (include("host") && !SELECTED_HOSTS.has(host)) return false;
+      if (include("project") && !SELECTED_PROJECTS.has(projectOf(r))) return false;
+      if (include("source") && SELECTED_SOURCE && r.source !== SELECTED_SOURCE) return false;
+      if (include("model") && SELECTED_MODEL && r.model !== SELECTED_MODEL) return false;
       const dk = dayKey(r.timestamp_ms);
-      if (skip !== "daySelection" && SELECTED_DAY && dk !== SELECTED_DAY) return false;
-      if (DATE_FROM && (!dk || dk < DATE_FROM)) return false;
-      if (DATE_TO && (!dk || dk > DATE_TO)) return false;
-      if (needle) {
+      if (include("daySelection") && SELECTED_DAY && dk !== SELECTED_DAY) return false;
+      if (!reportInRange(dk)) return false;
+      if (include("search") && needle) {
         const hay = [r.model, r.chat_title, host, r.source, r.details, projectLabel(projectOf(r)), r.session_id]
           .filter(Boolean).join(" ").toLowerCase();
         if (!hay.includes(needle)) return false;
@@ -1090,10 +1174,10 @@
 
   // ---------- rendering ----------
   function renderMachineList() {
-    const totals = {};
+    const totals = Object.create(null);
     for (const r of RECORDS) {
       const h = r.hostname || "unknown-host";
-      totals[h] = (totals[h] || 0) + displayUsage(r.credits);
+      totals[h] = (totals[h] || 0) + showUsageAmount(r);
     }
     const ul = document.getElementById("machine-list");
     ul.innerHTML = "";
@@ -1115,7 +1199,7 @@
       li.innerHTML = `<input type="checkbox" ${SELECTED_HOSTS.has(h) ? "checked" : ""}>
         <span class="swatch" style="background:${HOST_COLOR[h]}"></span>
         <span class="host mask">${escapeHtml(h)}</span>
-        <span class="sub">${fmtNum(totals[h] || 0)}</span>`;
+        <span class="sub">${reportUi.sheet === "usage" ? fmtNum(totals[h] || 0) : ""}</span>`;
       li.querySelector("input").addEventListener("change", e => {
         if (e.target.checked) SELECTED_HOSTS.add(h);
         else SELECTED_HOSTS.delete(h);
@@ -1127,10 +1211,10 @@
   }
 
   function renderProjectList() {
-    const totals = {};
+    const totals = Object.create(null);
     for (const r of RECORDS) {
       const p = projectOf(r);
-      totals[p] = (totals[p] || 0) + displayUsage(r.credits);
+      totals[p] = (totals[p] || 0) + showUsageAmount(r);
     }
     const ul = document.getElementById("project-list");
     ul.innerHTML = "";
@@ -1151,7 +1235,7 @@
       li.innerHTML = `<input type="checkbox" ${SELECTED_PROJECTS.has(p) ? "checked" : ""}>
         <span class="swatch" style="background:${PROJECT_COLOR[p]}"></span>
         <span class="name ${p === NO_PROJECT ? "" : "mask"}" title="${escapeHtml(projectLabel(p))}">${escapeHtml(projectLabel(p))}</span>
-        <span class="sub">${fmtNum(totals[p] || 0)}</span>`;
+        <span class="sub">${reportUi.sheet === "usage" ? fmtNum(totals[p] || 0) : ""}</span>`;
       li.querySelector("input").addEventListener("change", e => {
         if (e.target.checked) SELECTED_PROJECTS.add(p);
         else SELECTED_PROJECTS.delete(p);
@@ -1183,22 +1267,22 @@
       chip("project", `${t("filter.project")}: ${Array.from(SELECTED_PROJECTS).map(projectLabel).join(", ")}`,
         () => { PROJECTS.forEach(p => SELECTED_PROJECTS.add(p)); });
     }
-    if (SELECTED_MODEL) {
+    if (reportUi.sheet !== "history" && SELECTED_MODEL) {
       chip("model", `${t("filter.model")}: ${SELECTED_MODEL}`, () => { SELECTED_MODEL = ""; });
     }
-    if (SELECTED_SOURCE) {
+    if (reportUi.sheet !== "history" && SELECTED_SOURCE) {
       chip("source", `${t("filter.source")}: ${SELECTED_SOURCE}`, () => { SELECTED_SOURCE = ""; });
     }
     if (SELECTED_DAY) {
-      chip("day", `${t("filter.day")}: ${SELECTED_DAY}`, () => { SELECTED_DAY = ""; });
+      chip("day", `${t("sheet.focus")}: ${reportDate(SELECTED_DAY)}`, () => { SELECTED_DAY = ""; });
     }
     if (DATE_FROM) {
-      chip("from", `${t("filter.dateFrom")}: ${DATE_FROM}`, () => { DATE_FROM = ""; DATE_PRESET = "custom"; });
+      chip("from", `${t("filter.dateFrom")}: ${reportDate(DATE_FROM)}`, () => { DATE_FROM = ""; DATE_PRESET = "custom"; reportUi.scale = ""; });
     }
     if (DATE_TO) {
-      chip("to", `${t("filter.dateTo")}: ${DATE_TO}`, () => { DATE_TO = ""; DATE_PRESET = "custom"; });
+      chip("to", `${t("filter.dateTo")}: ${reportDate(DATE_TO)}`, () => { DATE_TO = ""; DATE_PRESET = "custom"; reportUi.scale = ""; });
     }
-    if (FILTER_TEXT.trim()) {
+    if (reportUi.sheet !== "history" && FILTER_TEXT.trim()) {
       chip("search", `${t("filter.search")}: ${FILTER_TEXT.trim()}`, () => { FILTER_TEXT = ""; });
     }
 
@@ -1237,7 +1321,12 @@
   function resetAllFilters() {
     HOSTS.forEach(h => SELECTED_HOSTS.add(h));
     PROJECTS.forEach(p => SELECTED_PROJECTS.add(p));
+    if (reportUi.sheet === "history") {
+      reportSetRange("", "", { preset: "all", focus: "" });
+      return;
+    }
     SELECTED_MODEL = ""; SELECTED_SOURCE = ""; SELECTED_DAY = "";
+    reportUi.scale = ""; effortUi.source = "";
     DATE_FROM = ""; DATE_TO = ""; DATE_PRESET = "all"; FILTER_TEXT = "";
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
     set("filter", ""); set("date-from", ""); set("date-to", "");
@@ -1253,19 +1342,11 @@
   }
 
   function applyDatePreset(preset) {
-    DATE_PRESET = preset;
-    SELECTED_DAY = "";
-    DATE_TO = DATA_MAX_DAY;
-    if (preset === "7d") DATE_FROM = offsetDay(DATA_MAX_DAY, -6);
-    else if (preset === "30d") DATE_FROM = offsetDay(DATA_MAX_DAY, -29);
-    else if (preset === "3m") DATE_FROM = offsetMonth(DATA_MAX_DAY, -3);
-    else { DATE_PRESET = "all"; DATE_FROM = ""; DATE_TO = ""; }
-    const from = document.getElementById("date-from");
-    const to = document.getElementById("date-to");
-    if (from) from.value = DATE_FROM;
-    if (to) to.value = DATE_TO;
-    CURRENT_PAGE = 1;
-    renderAll();
+    const [, latest] = reportDataBounds();
+    if (preset === "7d") reportSetRange(offsetDay(latest, -6), latest, { preset });
+    else if (preset === "30d") reportSetRange(offsetDay(latest, -29), latest, { preset });
+    else if (preset === "3m") reportSetRange(offsetMonth(latest, -3), latest, { preset });
+    else reportSetRange("", "", { preset: "all", focus: "" });
   }
 
   function syncPricingControls() {
@@ -1273,24 +1354,24 @@
     const rate = document.getElementById("cny-rate");
     const rateRow = document.getElementById("cny-rate-row");
     const formula = document.getElementById("pricing-formula");
-    currency.disabled = !COST_ENABLED;
+    document.getElementById("cost-toggle").disabled = reportUi.sheet !== "usage";
+    document.getElementById("cost-toggle").checked = showMoney();
+    currency.disabled = !showMoney() || reportUi.sheet !== "usage";
     currency.value = COST_CURRENCY;
     rate.value = CNY_PER_USD.toFixed(2);
-    rate.disabled = !COST_ENABLED || COST_CURRENCY !== "CNY";
+    rate.disabled = !showMoney() || COST_CURRENCY !== "CNY" || reportUi.sheet !== "usage";
     rateRow.classList.toggle("hidden", COST_CURRENCY !== "CNY");
     const cnyPerCredit = USD_PER_CREDIT * CNY_PER_USD;
-    formula.textContent = COST_CURRENCY === "CNY"
+    formula.textContent = reportUi.sheet !== "usage" ? t("ledger.noMoney") : COST_CURRENCY === "CNY"
       ? `${t("pricing.formulaCny", { value: fmtNum(cnyPerCredit, 4) })} · ${t("pricing.rateReference", { date: CNY_RATE_REFERENCE_DATE })} · ${t("pricing.estimateNote")}`
       : `${t("pricing.formulaCredits")} · ${t("pricing.estimateNote")}`;
   }
 
   function updateUsageLabels() {
-    document.getElementById("kpi-total-label").textContent = COST_ENABLED
-      ? t("pricing.estimatedCost", { unit: usageUnit() }) : t("kpi.total");
-    document.getElementById("daily-chart-title").textContent = COST_ENABLED
-      ? t("pricing.dailyCost", { unit: usageUnit() }) : t("charts.daily");
-    document.getElementById("machine-usage-heading").textContent = COST_ENABLED
-      ? t("pricing.cost", { unit: usageUnit() }) : t("cols.credits");
+    document.getElementById("kpi-total-label").textContent = showMoney()
+      ? t("pricing.estimatedCost", { unit: usageUnit() }) : t("ledger.credits");
+    document.getElementById("daily-chart-title").textContent = `${t("sheet.dayTotals")} · ${usageUnit()}`;
+    document.getElementById("machine-usage-heading").textContent = usageUnit();
   }
 
   function renderSourceFilter() {
@@ -1311,7 +1392,7 @@
   }
 
   function renderKpis(records) {
-    const totalCredits = records.reduce((sum, r) => sum + displayUsage(r.credits), 0);
+    const totalCredits = records.reduce((sum, r) => sum + showUsageAmount(r), 0);
     const days = new Set();
     let minDay = null, maxDay = null, lastTs = null;
     const dayTotals = {};
@@ -1322,7 +1403,7 @@
         if (!minDay || k < minDay) minDay = k;
         if (!maxDay || k > maxDay) maxDay = k;
         if (lastTs == null || r.timestamp_ms > lastTs) lastTs = r.timestamp_ms;
-        dayTotals[k] = (dayTotals[k] || 0) + displayUsage(r.credits);
+        dayTotals[k] = (dayTotals[k] || 0) + showUsageAmount(r);
       }
     }
     const active = days.size;
@@ -1362,38 +1443,40 @@
       t("kpi.timedExchanges", { n: timedCount.toLocaleString() });
     document.getElementById("kpi-avg-exchange-sub").textContent = t("kpi.perExchangeHint");
 
-    document.getElementById("date-range").textContent =
-      minDay && maxDay ? `${minDay} → ${maxDay}` : t("kpi.noTime");
   }
 
   function renderDailyChart(records) {
     const container = document.getElementById("daily-chart");
     const legend = document.getElementById("daily-legend");
-    // aggregate by day and host
-    const byDay = {}; // day -> host -> credits
-    for (const r of records) {
-      const k = dayKey(r.timestamp_ms);
-      if (!k) continue;
-      const h = r.hostname || "unknown-host";
-      if (!byDay[k]) byDay[k] = {};
-      byDay[k][h] = (byDay[k][h] || 0) + displayUsage(r.credits);
-    }
-    const days = Object.keys(byDay).sort();
-    if (days.length === 0) {
+    const [start, end] = reportRange();
+    if (!start || !end || start > end) {
       container.innerHTML = `<div class="empty">${t("kpi.noTime")}</div>`;
       legend.innerHTML = "";
       return;
     }
+    const monthly = dayNumber(end) - dayNumber(start) >= 62;
+    const keyOf = d => monthly ? `${d.slice(0, 7)}-01` : d;
+    const days = [];
+    for (let date = keyOf(start); date <= end; date = monthly ? offsetMonth(date, 1) : offsetDay(date, 1)) days.push(date);
+    const byDay = Object.create(null);
+    for (const r of records) {
+      const k = dayKey(r.timestamp_ms);
+      if (!k) continue;
+      const h = r.hostname || EFFORT_HOST, bucket = keyOf(k);
+      if (!byDay[bucket]) byDay[bucket] = Object.create(null);
+      byDay[bucket][h] = (byDay[bucket][h] || 0) + showUsageAmount(r);
+    }
+    document.getElementById("daily-chart-title").textContent = `${t(monthly ? "sheet.monthly" : "sheet.dayTotals")} · ${usageUnit()}`;
     // determine max stacked total
     let maxTotal = 0;
     for (const d of days) {
-      const sum = Object.values(byDay[d]).reduce((s, v) => s + v, 0);
+      const sum = Object.values(byDay[d] || {}).reduce((s, v) => s + v, 0);
       if (sum > maxTotal) maxTotal = sum;
     }
-    const W = 720, H = 220, padL = 44, padR = 10, padT = 12, padB = 26;
+    const W = 720, H = 248, padL = 55, padR = 12, padT = 12, padB = 30;
     const innerW = W - padL - padR, innerH = H - padT - padB;
     const barGap = 2;
-    const barW = Math.max(2, Math.min(18, (innerW / days.length) - barGap));
+    const barW = Math.max(.8, Math.min(30, (innerW / days.length) - barGap));
 
     // Y-axis ticks (4 levels)
     const niceMax = niceCeil(maxTotal);
@@ -1414,39 +1497,41 @@
     const step = innerW / days.length;
     days.forEach((d, idx) => {
       const x = padL + idx * step + (step - barW) / 2;
-      const dim = SELECTED_DAY && SELECTED_DAY !== d ? " dim" : "";
+      const isFocus = SELECTED_DAY && keyOf(SELECTED_DAY) === d;
       let cursorY = padT + innerH;
       let colTotal = 0;
       for (const h of activeHosts) {
-        const v = byDay[d][h] || 0;
+        const v = byDay[d]?.[h] || 0;
         if (v <= 0) continue;
         colTotal += v;
         const h_ = (innerH * (v / (niceMax || 1)));
         cursorY -= h_;
-        svg += `<rect class="bar${dim}" x="${x}" y="${cursorY}" width="${barW}" height="${h_}" fill="${HOST_COLOR[h]}">
-          <title>${d} · ${escapeHtml(h)} · ${fmtNum(v, 2)}</title></rect>`;
+        svg += `<rect x="${x}" y="${cursorY}" width="${barW}" height="${h_}" fill="${HOST_COLOR[h]}"/>`;
       }
-      // Invisible full-height hit area so the whole day column is clickable.
-      svg += `<rect class="bar hit" data-day="${d}" x="${padL + idx * step}" y="${padT}"
-        width="${step}" height="${innerH}" fill="transparent">
-        <title>${d} · ${fmtNum(colTotal, 2)} · ${t("charts.clickHint")}</title></rect>`;
+      const label = `${reportDate(d, monthly ? { month: "short", year: "numeric" } : undefined)} · ${fmtNum(colTotal, 2)} ${usageUnit()}`;
+      svg += `<rect class="bar hit usage-hit${isFocus ? " is-focus" : ""}" data-day="${d}" x="${padL + idx * step}" y="${padT}"
+        width="${step}" height="${H-padT-19}" role="button" tabindex="0" aria-label="${escapeHtml(label)}"><title>${escapeHtml(label)}</title></rect>`;
     });
     // X labels (first, last, ~3 middle)
     const labelIdx = uniqueSorted([0, Math.floor(days.length/4), Math.floor(days.length/2), Math.floor(3*days.length/4), days.length-1]);
     for (const idx of labelIdx) {
       if (idx < 0 || idx >= days.length) continue;
       const x = padL + idx * step + step/2;
-      svg += `<text x="${x}" y="${H-8}" fill="var(--text-dim)" font-size="10" text-anchor="middle" font-family="inherit">${days[idx]}</text>`;
+      const label = reportDate(days[idx], monthly ? { month: "short", year: "2-digit" } : { month: "numeric", day: "numeric" });
+      svg += `<text x="${x}" y="${H-6}" fill="var(--text-dim)" font-size="11" text-anchor="middle" font-family="inherit">${escapeHtml(label)}</text>`;
     }
     svg += `</svg>`;
     container.innerHTML = svg;
     container.querySelectorAll("rect.hit[data-day]").forEach(rect => {
-      rect.addEventListener("click", () => {
+      const select = () => {
         const d = rect.getAttribute("data-day");
-        SELECTED_DAY = (SELECTED_DAY === d) ? "" : d;
-        CURRENT_PAGE = 1;
-        renderAll();
-      });
+        if (monthly) {
+          const month = calendarPeriod(d, "month");
+          reportSetRange(d < start ? start : d, month[1] > end ? end : month[1]);
+        } else reportPickDay(d, null, "usage");
+      };
+      rect.addEventListener("click", select);
+      rect.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(); } });
     });
 
     legend.innerHTML = activeHosts.map(h =>
@@ -1474,8 +1559,8 @@
     let total = 0;
     for (const r of records) {
       const m = r.model || "(unknown)";
-      totals[m] = (totals[m] || 0) + displayUsage(r.credits);
-      total += displayUsage(r.credits);
+      totals[m] = (totals[m] || 0) + showUsageAmount(r);
+      total += showUsageAmount(r);
     }
     const entries = Object.entries(totals).sort((a, b) => b[1] - a[1]);
     const TOP = 4;
@@ -1541,7 +1626,7 @@
     const totals = {};
     for (const r of records) {
       const p = projectOf(r);
-      totals[p] = (totals[p] || 0) + displayUsage(r.credits);
+      totals[p] = (totals[p] || 0) + showUsageAmount(r);
     }
     const entries = Object.entries(totals).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
     if (entries.length === 0) {
@@ -1596,7 +1681,7 @@
       const sid = r.session_id || "(none)";
       if (!sessions[sid]) sessions[sid] = { credits: 0, turns: 0, duration: 0, project: projectOf(r), total: r.session_total || 0 };
       const s = sessions[sid];
-      s.credits += displayUsage(r.credits);
+      s.credits += showUsageAmount(r);
       if (r.turn_index != null) s.turns += 1;
       if (r.duration_ms != null && r.duration_ms > 0) s.duration += r.duration_ms;
       if (r.session_total) s.total = Math.max(s.total, r.session_total);
@@ -1615,7 +1700,7 @@
         <th data-i18n="sessions.colProject">${t("sessions.colProject")}</th>
         <th class="num">${t("sessions.colTurns")}</th>
         <th class="num">${t("sessions.colTime")}</th>
-        <th class="num">${COST_ENABLED ? t("pricing.cost", { unit: usageUnit() }) : t("sessions.colCredits")}</th>
+        <th class="num">${escapeHtml(usageUnit())}</th>
       </tr></thead>
       <tbody>${rows.map(([sid, s]) => `<tr style="cursor:pointer" data-session="${escapeHtml(sid)}">
         <td><span class="session-name mask" title="${escapeHtml(sid)}">${escapeHtml(sessionNameById(sid))}</span></td>
@@ -1631,6 +1716,8 @@
         FILTER_TEXT = sid;
         const fEl = document.getElementById("filter");
         if (fEl) fEl.value = sid;
+        reportUi.detail = "usage";
+        document.getElementById("related-drawer").open = true;
         CURRENT_PAGE = 1;
         renderAll();
       });
@@ -1644,11 +1731,11 @@
       if (!stats[h]) stats[h] = { records: 0, credits: 0, days: new Set(), models: {} };
       const s = stats[h];
       s.records += 1;
-      s.credits += displayUsage(r.credits);
+      s.credits += showUsageAmount(r);
       const k = dayKey(r.timestamp_ms);
       if (k) s.days.add(k);
       const m = r.model || "(unknown)";
-      s.models[m] = (s.models[m] || 0) + displayUsage(r.credits);
+      s.models[m] = (s.models[m] || 0) + showUsageAmount(r);
     }
     const totalCredits = Object.values(stats).reduce((s, v) => s + v.credits, 0);
     const rows = Object.entries(stats).sort((a, b) => b[1].credits - a[1].credits);
@@ -1722,7 +1809,7 @@
         <td><span class="chip model">${escapeHtml(r.model || "")}</span></td>
         <td>${sessionCell}</td>
         <td>${roundCell}</td>
-        <td class="num">${fmtUsage(r.credits, 2)}</td>
+        <td class="num">${fmtUsage(billingNumber(r), 2)}</td>
         <td class="num dur">${fmtDuration(r.duration_ms)}</td>
         <td class="src-cell">${sourceCell(r)}</td>
       </tr>`;
@@ -1763,8 +1850,7 @@
       const funnel = col.filter
         ? `<button class="th-funnel ${funnelActive}" data-col="${key}" title="${escapeHtml(t("colfilter.title"))}" aria-label="filter">⏷</button>`
         : "";
-      const label = key === "credits" && COST_ENABLED
-        ? t("pricing.cost", { unit: usageUnit() }) : t(col.label);
+      const label = key === "credits" ? usageUnit() : t(col.label);
       th.innerHTML = `<span class="th-inner">
           <span class="th-sort ${sorted ? "sorted" : ""}" data-col="${key}" title="${escapeHtml(t("colfilter.sortHint"))}">
             ${escapeHtml(label)}<span class="arrow">${arrow}</span>
@@ -1917,32 +2003,45 @@
 
   function renderSummaryLine() {
     document.getElementById("summary-line").textContent =
-      t("header.summary", { machines: HOSTS.length, records: RECORDS.length.toLocaleString() });
+      reportUi.sheet === "history" ? t("history.header", { n: fmtNum(historyRows().length, 0) })
+      : reportUi.sheet === "effort" ? t("effort.count", { n: fmtNum(effortEventsInRange({ useSource: true }).length, 0) })
+      : t("header.summary", { machines: HOSTS.length, records: RECORDS.length.toLocaleString() });
   }
+
+  __GH_USAGE_SHEETS_SCRIPT__
+  __GH_USAGE_EFFORT_SCRIPT__
 
   // ---------- main render ----------
   function renderAll() {
     const recs = filteredRecords();
+    const rangeRecords = filteredRecords("daySelection");
+    reportSyncChrome();
+    renderSummaryLine();
+    renderTimeNavigator();
     syncDatePresetButtons();
     syncPricingControls();
     updateUsageLabels();
     renderFilterBar();
     syncSidebarChecks();
-    renderKpis(recs);
-    renderDailyChart(filteredRecords("daySelection"));
-    renderModelChart(filteredRecords("model"));
-    renderProjectChart(filteredRecords("project"));
-    renderTopSessions(recs);
-    renderByMachine(recs);
-    renderRecordsHead();
-    renderRecordsTable(recs);
+    if (reportUi.sheet === "history") { renderHistory(); return; }
+    if (reportUi.sheet === "usage") {
+      renderKpis(rangeRecords);
+      renderDailyChart(rangeRecords);
+      renderModelChart(filteredRecords(["model", "daySelection"]));
+      renderProjectChart(filteredRecords(["project", "daySelection"]));
+      renderTopSessions(rangeRecords);
+      renderByMachine(rangeRecords);
+    } else renderEffort();
+    if (reportUi.detail === "usage") {
+      renderRecordsHead();
+      renderRecordsTable(recs);
+    } else renderEffortDetail();
   }
 
   function applyLang(lang) {
     CURRENT_LANG = (lang === "zh") ? "zh" : "en";
     try { localStorage.setItem("gh-usage.lang", CURRENT_LANG); } catch (_) {}
     applyStaticI18n();
-    renderSummaryLine();
     renderMachineList();
     renderProjectList();
     renderAll();
@@ -1968,18 +2067,10 @@
     renderAll();
   });
   document.getElementById("date-from").addEventListener("change", e => {
-    DATE_FROM = e.target.value || "";
-    DATE_PRESET = "custom";
-    SELECTED_DAY = "";
-    CURRENT_PAGE = 1;
-    renderAll();
+    reportSetRange(e.target.value || "", DATE_TO);
   });
   document.getElementById("date-to").addEventListener("change", e => {
-    DATE_TO = e.target.value || "";
-    DATE_PRESET = "custom";
-    SELECTED_DAY = "";
-    CURRENT_PAGE = 1;
-    renderAll();
+    reportSetRange(DATE_FROM, e.target.value || "");
   });
   document.getElementById("page-size").addEventListener("change", e => {
     const n = parseInt(e.target.value, 10);
@@ -2131,11 +2222,7 @@
 
   // boot
   document.getElementById("generated-at").textContent = RAW && RAW.generatedAt ? RAW.generatedAt : "—";
-  for (const id of ["date-from", "date-to"]) {
-    const el = document.getElementById(id);
-    if (DATA_MIN_DAY) el.min = DATA_MIN_DAY;
-    if (DATA_MAX_DAY) el.max = DATA_MAX_DAY;
-  }
+  bindReportSheets();
   renderSourceFilter();
   try {
     COST_ENABLED = localStorage.getItem("gh-usage.costEnabled") === "1";

@@ -1,0 +1,4 @@
+source,timestamp_ms,model,credits,request_count,session_id,turn_index,file,line
+vscode.chatSessions,1784890800000,GPT-Test,10,,shared-id,1,chat.jsonl,1
+vscode.chatSessions,1784890800000,GPT-Test,20,,shared-id,2,chat.jsonl,1
+vscode.chatSessions,1776412800000,GPT-Test,0,1,legacy-id,1,chat.jsonl,2

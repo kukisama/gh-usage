@@ -8,6 +8,24 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.5] — 2026-11-23
+
+See time spent interacting with Copilot separately from AI credits, and explore older request counts without mixing billing units.
+
+### Added
+
+- **Effort time has its own sheet.** Browse year, month, week, and day views and drill down to the original human submissions. Each occupied Beijing-time half hour counts once across the selected projects, regardless of how many times you submit; waiting and background execution do not count. Month bars show the share of a 24-hour day, and weekly totals turn green below 30 hours, yellow from 30 to under 50 hours, and red at 50 hours or more.
+- **Optional Markdown effort report.** Use `--effort-report <PATH>` to export source references, exclusions, and daily occupied intervals. Repeat `--effort-project <NAME>` to select exact project names without changing the usage export, or use `--no-effort` to omit effort from HTML.
+
+### Changed
+
+- **Usage and Historical requests are separate sheets.** Usage shows AI credits only. Historical requests follows the dates actually recorded for each source and counts VS Code request entries and CLI model calls separately, without applying model multipliers or converting them to credits. Older values without a recoverable count are shown for audit only.
+
+### Fixed
+
+- **More accurate local usage totals.** VS Code session totals now contribute only the portion not already assigned to turns. CLI shutdown snapshots with the same session start and unit are not added together, and older request-era values are no longer treated as AI credits.
+- **Multi-machine merges preserve host attribution.** Missing hostnames are recovered from the CSV that supplied each row. Duplicates from the same machine are removed without collapsing matching records from different machines. Merged usage CSVs do not contain the submission timestamps needed to calculate effort.
+
 ## [1.2.4] — 2026-09-26
 
 More complete usage totals for large multi-agent tasks, with one-command report viewing.
@@ -116,6 +134,7 @@ The first stable release — fast, local, and to the point.
 
 ---
 
+[1.2.5]: https://github.com/kukisama/gh-usage/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/kukisama/gh-usage/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/kukisama/gh-usage/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/kukisama/gh-usage/releases/tag/v1.2.2
