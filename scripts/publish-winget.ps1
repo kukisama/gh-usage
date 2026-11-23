@@ -230,12 +230,12 @@ function Initialize-GitHubAuthentication {
         }
     }
 
-    $login = (& gh api user --jq '.login' | Out-String).Trim()
+    $login = (& gh api user --jq '.login' 2>$null | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or -not $login) {
         throw 'Could not determine the authenticated GitHub account.'
     }
 
-    Write-Host "Authenticated GitHub account: $login" -ForegroundColor Green
+    Write-Host 'GitHub CLI authentication verified.' -ForegroundColor Green
     return $login
 }
 
@@ -270,7 +270,11 @@ function Get-GitHubRepositoryIfExists {
     )
 
     $query = 'query($owner:String!,$name:String!){repository(owner:$owner,name:$name){nameWithOwner,isFork,viewerPermission,defaultBranchRef{name},parent{name,owner{login}}}}'
-    $result = Get-JsonFromGh -Arguments @('api', 'graphql', '-f', "query=$query", '-F', "owner=$Owner", '-F', "name=$Name")
+    $output = & gh api graphql -f "query=$query" -F "owner=$Owner" -F "name=$Name" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Could not look up the personal winget-pkgs fork. Check the active GitHub account and its fork access.'
+    }
+    $result = $output | ConvertFrom-Json
     return $result.data.repository
 }
 
@@ -278,35 +282,35 @@ function Sync-WingetFork {
     param([Parameter(Mandatory = $true)][string]$GitHubLogin)
 
     $forkRepository = "$GitHubLogin/winget-pkgs"
-    Write-Host "Checking winget fork $forkRepository..." -ForegroundColor Cyan
+    Write-Host 'Checking the personal winget-pkgs fork...' -ForegroundColor Cyan
     $fork = Get-GitHubRepositoryIfExists -Owner $GitHubLogin -Name 'winget-pkgs'
     if ($null -eq $fork) {
         Write-Host "No personal winget-pkgs fork exists. Creating one without changing this repository's Git remotes..." -ForegroundColor Yellow
-        & gh repo fork $WingetRepository --clone=false --remote=false --default-branch-only
+        & gh repo fork $WingetRepository --clone=false --remote=false --default-branch-only *> $null
         if ($LASTEXITCODE -ne 0) {
-            throw "Could not create $forkRepository. Check GitHub permissions and rerun the script."
+            throw 'Could not create the personal winget-pkgs fork. See scripts/publish-winget.md for the manual fallback.'
         }
         $fork = Get-GitHubRepositoryIfExists -Owner $GitHubLogin -Name 'winget-pkgs'
         if ($null -eq $fork) {
-            throw "GitHub accepted the fork request, but $forkRepository is not ready yet. Wait briefly and rerun the script."
+            throw 'GitHub accepted the fork request, but the personal winget-pkgs fork is not ready yet. Wait briefly and rerun the script.'
         }
     }
 
     $parentRepository = if ($fork.parent) { "$($fork.parent.owner.login)/$($fork.parent.name)" } else { '' }
     if (-not $fork.isFork -or $parentRepository -ne $WingetRepository) {
-        throw "$forkRepository exists but is not a fork of $WingetRepository. The script will not replace or modify an unrelated repository."
+        throw "The personal winget-pkgs repository is not a fork of $WingetRepository. The script will not replace or modify an unrelated repository."
     }
     if ($fork.viewerPermission -notin @('WRITE', 'MAINTAIN', 'ADMIN')) {
-        throw "The authenticated GitHub account does not have write access to $forkRepository (permission: $($fork.viewerPermission))."
+        throw "The authenticated GitHub account does not have write access to the personal fork (permission: $($fork.viewerPermission))."
     }
     if ($fork.defaultBranchRef.name -ne $WingetDefaultBranch) {
-        throw "$forkRepository uses '$($fork.defaultBranchRef.name)' as its default branch instead of '$WingetDefaultBranch'. Fix the fork before submitting."
+        throw "The personal fork uses '$($fork.defaultBranchRef.name)' as its default branch instead of '$WingetDefaultBranch'. Fix the fork before submitting."
     }
 
     $compareEndpoint = "repos/$WingetRepository/compare/${WingetDefaultBranch}...${GitHubLogin}:${WingetDefaultBranch}"
-    $status = (& gh api $compareEndpoint --jq '.status' | Out-String).Trim()
+    $status = (& gh api $compareEndpoint --jq '.status' 2>$null | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or -not $status) {
-        throw "Could not compare $forkRepository with $WingetRepository."
+        throw "Could not compare the personal fork with $WingetRepository."
     }
 
     switch ($status) {
@@ -315,29 +319,29 @@ function Sync-WingetFork {
         }
         'behind' {
             Write-Host "Winget fork is behind upstream; syncing $WingetDefaultBranch..." -ForegroundColor Yellow
-            & gh repo sync $forkRepository --source $WingetRepository --branch $WingetDefaultBranch
+            & gh repo sync $forkRepository --source $WingetRepository --branch $WingetDefaultBranch *> $null
             if ($LASTEXITCODE -ne 0) {
-                throw "Could not fast-forward $forkRepository. The script deliberately avoids --force so personal commits are never discarded."
+                throw 'Could not fast-forward the personal fork. The script deliberately avoids --force so personal commits are never discarded.'
             }
 
-            $status = (& gh api $compareEndpoint --jq '.status' | Out-String).Trim()
+            $status = (& gh api $compareEndpoint --jq '.status' 2>$null | Out-String).Trim()
             if ($LASTEXITCODE -ne 0 -or $status -ne 'identical') {
-                throw "Fork synchronization completed but $forkRepository is still '$status' relative to upstream."
+                throw "Fork synchronization completed but the personal fork is still '$status' relative to upstream."
             }
             Write-Host "Winget fork synchronized successfully." -ForegroundColor Green
         }
         { $_ -in @('ahead', 'diverged') } {
-            throw "$forkRepository is '$status' relative to $WingetRepository. The script will not force-reset your fork because that could discard personal commits. Restore the fork's $WingetDefaultBranch manually, then rerun."
+            throw "The personal fork is '$status' relative to $WingetRepository. The script will not force-reset your fork because that could discard personal commits. Restore the fork's $WingetDefaultBranch manually, then rerun."
         }
         default {
-            throw "Unexpected GitHub comparison status '$status' for $forkRepository."
+            throw "Unexpected GitHub comparison status '$status' for the personal fork."
         }
     }
 }
 
 function Initialize-WingetCreateAuthentication {
     Write-Host "Checking WingetCreate GitHub OAuth authentication..." -ForegroundColor Cyan
-    Write-Host "WingetCreate uses a separate cached token from GitHub CLI and may open a browser if authentication is required." -ForegroundColor DarkGray
+    Write-Host 'WingetCreate uses separate credentials. If prompted, sign in with the same GitHub account as GitHub CLI.' -ForegroundColor DarkGray
     & wingetcreate token --store
     if ($LASTEXITCODE -ne 0) {
         throw 'WingetCreate GitHub authentication failed. Complete its browser/device login, authorize Microsoft organization SSO if requested, and rerun the script.'
