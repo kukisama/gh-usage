@@ -12,10 +12,10 @@ use std::path::Path;
 use serde_json::{Value, json};
 use serde_json::value::RawValue;
 
-use super::{
-    ContextFields, FileScanResult, UsageRecord, display_model_id, effort, format_local_time,
-    merge_context_from_object, parse_credit_details, parse_premium_details,
-};
+use crate::billing::{parse_credit_details, parse_premium_details};
+use crate::record::{ContextFields, EffortEvent, EffortKind, FileScanResult, UsageRecord};
+use crate::scan_fields::{display_model_id, merge_context_from_object};
+use crate::time::format_local_time;
 
 #[derive(Default)]
 struct Session {
@@ -337,7 +337,7 @@ impl Session {
         }
     }
 
-    fn effort_events(&self, path: &Path, project: Option<&str>) -> Vec<effort::Event> {
+    fn effort_events(&self, path: &Path, project: Option<&str>) -> Vec<EffortEvent> {
         let session = self.state.get("sessionId").and_then(Value::as_str)
             .or_else(|| path.file_stem().and_then(|s| s.to_str())).unwrap_or_default();
         let event = |r: &Value, pending: Option<&Value>| {
@@ -346,15 +346,15 @@ impl Session {
                 || r.get("message").and_then(Value::as_str) == Some("terminal") && r.get("terminalExecutionId").and_then(Value::as_str).is_some()
                 || pending.is_some_and(|p| ["/sendOptions/isSystemInitiated", "/sendOptions/hideFromTranscript"].iter()
                     .any(|k| p.pointer(k).and_then(Value::as_bool) == Some(true)));
-            effort::Event {
+            EffortEvent {
                 source: "VS Code", session: session.to_owned(),
                 id: r.get("requestId").and_then(Value::as_str).or_else(|| pending.and_then(|p| p.get("id").and_then(Value::as_str))).map(ToOwned::to_owned),
                 project: project.map(ToOwned::to_owned),
                 timestamp_ms: r.get("timestamp").and_then(Value::as_i64).filter(|&t| t > 0),
                 file: path.to_path_buf(),
                 line: r.get("_requestLine").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()).unwrap_or(1),
-                kind: if automatic { effort::Kind::Automatic } else if pending.is_some() { effort::Kind::Queued }
-                    else if r.get("message").and_then(Value::as_str).is_some() { effort::Kind::Human } else { effort::Kind::Unverified },
+                kind: if automatic { EffortKind::Automatic } else if pending.is_some() { EffortKind::Queued }
+                    else if r.get("message").and_then(Value::as_str).is_some() { EffortKind::Human } else { EffortKind::Unverified },
             }
         };
         let mut used = HashSet::new();
@@ -366,8 +366,8 @@ impl Session {
                 && let Some(r) = pending.get("request") {
                 used.insert(id);
                 let queued = event(r, Some(pending));
-                if queued.kind == effort::Kind::Automatic {
-                    submission.kind = effort::Kind::Automatic;
+                if queued.kind == EffortKind::Automatic {
+                    submission.kind = EffortKind::Automatic;
                 } else if queued.timestamp_ms.is_some() {
                     submission.timestamp_ms = queued.timestamp_ms;
                     submission.line = queued.line;
@@ -555,6 +555,7 @@ pub(super) fn scan(path: &Path, project: Option<String>, collect_effort: bool) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::record::assign_turn_indices;
     use std::fs;
 
     fn scan_entries(entries: &[Value]) -> FileScanResult {
@@ -621,7 +622,7 @@ mod tests {
             json!({"kind":1,"k":["sessionCostInfo"],"v":{"credits":30.0}}),
             json!({"kind":1,"k":["sessionCostInfo"]}),
         ]);
-        super::super::assign_turn_indices(&mut result.records);
+        assign_turn_indices(&mut result.records);
         assert_eq!(result.parse_errors, 0);
         assert_eq!(result.records.iter().map(|r| r.credits).sum::<f64>(), 29.0);
         let remainder = result.records.last().unwrap();
@@ -643,8 +644,8 @@ mod tests {
         assert_eq!(result.parse_errors, 0);
         assert_eq!(result.records.len(), 1);
         let shape = result.effort.iter().map(|event| (event.id.as_deref(), event.timestamp_ms, event.kind, event.line)).collect::<Vec<_>>();
-        assert_eq!(shape, vec![(Some("manual"), Some(1000), effort::Kind::Human, 1), (Some("terminal"), Some(2000), effort::Kind::Automatic, 1),
-            (Some("missing"), None, effort::Kind::Human, 1), (Some("queued"), Some(3000), effort::Kind::Queued, 2)]);
+        assert_eq!(shape, vec![(Some("manual"), Some(1000), EffortKind::Human, 1), (Some("terminal"), Some(2000), EffortKind::Automatic, 1),
+            (Some("missing"), None, EffortKind::Human, 1), (Some("queued"), Some(3000), EffortKind::Queued, 2)]);
     }
 
     #[test]
@@ -775,7 +776,7 @@ mod tests {
             ]}}),
             json!({"kind":1,"k":["requests",2,"copilotCredits"],"v":30.125}),
         ]);
-        super::super::assign_turn_indices(&mut result.records);
+        assign_turn_indices(&mut result.records);
         assert_eq!(result.records.len(),2);
         assert_eq!(result.records[0].credits,10.0);
         assert_eq!(result.records[0].turn_index,Some(1));

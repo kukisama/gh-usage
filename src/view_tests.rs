@@ -1,4 +1,7 @@
-use super::{Cli, normalize_view_args, open_path, resolve_html_path, run_merge};
+use super::{Cli, normalize_view_args, resolve_html_path};
+use crate::merge::run_merge;
+use crate::platform::open_path;
+use crate::test_support::temporary_root;
 use clap::{Parser, error::ErrorKind};
 use std::path::{Path, PathBuf};
 
@@ -72,28 +75,28 @@ fn custom_report_path_and_legacy_no_html_are_preserved() {
 
 #[test]
 fn merge_accepts_view_and_respects_custom_html() {
-    let root = super::tests::temporary_cli_root("merge-view");
-    std::fs::write(root.join("copilot-usage-test.csv"), "hostname,model,credits\nhost,test-model,12.5\n").unwrap();
+    let root = temporary_root("merge-view");
+    std::fs::write(root.join("copilot-usage-host.csv"), "hostname,model,credits\nhost,test-model,12.5\n").unwrap();
     let output = root.join("custom report.html");
     let cli = parse(&["gh-usage", "--merge", "-v"]);
     assert!(cli.view);
     assert_eq!(cli.merge, Some(PathBuf::from(".")));
     // Test report generation without launching a real browser in unit tests.
-    run_merge(&root, false, false, Some(&output)).unwrap();
+    run_merge(&root, false, false, Some(&output), false).unwrap();
     let html = std::fs::read_to_string(&output).unwrap();
     assert!(html.contains("\"credits\":12.5"));
     assert!(!root.join("copilot-usage-merged.html").exists());
-    run_merge(&root, false, false, None).unwrap();
+    run_merge(&root, false, false, None, false).unwrap();
     assert!(root.join("copilot-usage-merged.html").is_file());
     std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
 fn merge_keeps_machine_and_billing_units_independent() {
-    let root = super::tests::temporary_cli_root("merge-units");
+    let root = temporary_root("merge-units");
     let output = root.join("report.html");
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/fixtures/merge-billing");
-    run_merge(&fixtures, false, false, Some(&output)).unwrap();
+    run_merge(&fixtures, false, false, Some(&output), false).unwrap();
     let html = std::fs::read_to_string(&output).unwrap();
     let data = html.split_once("<script id=\"gh-usage-data\" type=\"application/json\">").unwrap().1
         .split_once("</script>").unwrap().0;
@@ -116,7 +119,7 @@ fn merge_keeps_machine_and_billing_units_independent() {
 
 #[test]
 fn missing_report_is_not_sent_to_browser() {
-    let root = super::tests::temporary_cli_root("missing-report");
+    let root = temporary_root("missing-report");
     let error = open_path(&root.join("missing.html")).unwrap_err();
     assert!(error.to_string().contains("HTML report not found"));
     std::fs::remove_dir_all(root).unwrap();

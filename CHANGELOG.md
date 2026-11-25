@@ -8,6 +8,31 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.6] — Unreleased
+
+Rebuild reports from CSV without rescanning logs, and combine effort across machines without double-counting shared time slots.
+
+### Added
+
+- **Optional Rhythm layout.** Keep Classic or switch to a device atlas with comparable bars and a period inspector, plus a three-column trend workspace. Both layouts keep the same filters and totals.
+
+- **Separate effort CSV.** File-based usage CSV exports include a companion file with verified human submissions, including those with no recorded credits. The effort CSV does not include chat text. Use `--no-html` to export the CSVs without generating a report.
+- **Offline reconstruction and merging.** `--from-csv` rebuilds a report from one pair of CSVs without rescanning logs. `--merge` combines multiple machines and counts each occupied Beijing-time half-hour slot once across the selected machines. Older usage-only CSVs still work; AI credits and historical request counts remain separate.
+
+### Changed
+
+- **Source navigation follows the report mode.** Reports generated directly from local logs retain VS Code links to the source file and line. Reports generated with `--from-csv` or `--merge` display source labels without open or copy-path actions. Source coordinates remain in the exported data.
+- **Separate collection from rendering.** Split the Rust command entry point, collectors, shared records, CSV merge, and HTML rendering into modules. Default file-based CSV runs now generate HTML from the exported files without changing the usage CSV schema or the counting rules.
+
+### Fixed
+
+- **Show every month on the usage chart.** Each calendar month in view has a label, including months with no recorded usage. When the chart does not fit, drag or swipe it sideways. Clicking a bar still opens that month's daily breakdown.
+- **One standard export per machine.** Directory merges never add multiple snapshots of the same machine. Use `--from-csv` for custom-named archives. New file-based exports include a checksum receipt to bind usage and effort without changing the CSV columns; conflicting billing units or mismatched companions stop the import.
+- **VS Code workspace copies do not add charges.** Matching records for one request in different source files count once; conflicting amounts are reported instead.
+- **Accurate effort coverage.** Machines with empty usage exports remain listed. Missing effort CSVs are shown as not imported, not as zero effort.
+- **Keep sessions distinct across machines.** The session ranking and drill-down distinguish matching session IDs on different machines. Titles found only in historical records can also appear in effort details.
+- **Keep filters and dates consistent across sheets.** Usage-only filters stay with the Usage sheet. Switching between Usage and Effort keeps the selected date within the visible range, even when their log dates differ.
+
 ## [1.2.5] — 2026-11-23
 
 See time spent interacting with Copilot separately from AI credits, and explore older request counts without mixing billing units.
@@ -134,6 +159,7 @@ The first stable release — fast, local, and to the point.
 
 ---
 
+[1.2.6]: https://github.com/kukisama/gh-usage/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/kukisama/gh-usage/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/kukisama/gh-usage/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/kukisama/gh-usage/compare/v1.2.2...v1.2.3

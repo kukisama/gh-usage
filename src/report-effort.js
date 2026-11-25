@@ -44,7 +44,10 @@ function effortAggregate(events) {
 Object.assign(I18N.en, {
   "effort.kicker": "Human activity / UTC+08:00",
   "effort.title": "Effort timeline",
-  "effort.rule": "Each occupied half hour counts once across projects. Based on human submissions, not time spent waiting or letting AI run. Machine, project and date filters apply; billing filters do not.",
+  "effort.rule": "Each occupied half hour counts once across the selected machines and projects. Only human submissions count, not waiting or AI execution.",
+  "effort.importScope": "Effort data imported for {covered} of {total} selected machine(s).",
+  "effort.notImported": "No effort data imported for the selected machines.",
+  "effort.missingHosts": "Not provided:",
   "effort.projectRank": "Projects by effort",
   "effort.overlap": "Select a project to drill down. Projects can share slots; their hours are not additive.",
   "effort.projectFilter": "Effort project",
@@ -71,7 +74,10 @@ Object.assign(I18N.en, {
 Object.assign(I18N.zh, {
   "effort.kicker": "人工触发 / UTC+08:00",
   "effort.title": "精力时间带",
-  "effort.rule": "按人工提交落格，跨项目同一半小时只计一次；等待和 AI 运行不算。联动机器、项目和日期筛选，不受费用明细筛选影响。",
+  "effort.rule": "只按人工提交落格，所选机器和项目在同一半小时只计一格；等待和 AI 运行不计。",
+  "effort.importScope": "所选 {total} 台机器中，{covered} 台已导入精力数据。",
+  "effort.notImported": "所选机器未导入精力数据。",
+  "effort.missingHosts": "未提供：",
   "effort.projectRank": "按项目看精力",
   "effort.overlap": "点击查看该项目。不同项目可能占用同一格，小时数不能直接相加。",
   "effort.projectFilter": "精力项目",
@@ -105,6 +111,8 @@ const effortEl = id => document.getElementById(`effort-${id}`);
 const effortFormat = (n, digits = 0) => fmtNum(n, digits);
 const effortHourText = n => t("effort.hoursValue", { n: effortFormat(n, 1) });
 const effortCount = n => n === 1 ? t("effort.oneSubmission") : t("effort.count", { n: effortFormat(n) });
+const effortHostOf = event => event.hostname || EFFORT_HOST;
+const effortMissingAll = () => SELECTED_HOSTS.size > 0 && ![...SELECTED_HOSTS].some(host => EFFORT_HOSTS.has(host));
 
 function effortClock(slot) {
   return slot === 48 ? t("effort.nextDay") : `${String(slot >> 1).padStart(2, "0")}:${slot % 2 ? "30" : "00"}`;
@@ -137,10 +145,13 @@ function effortIsolateProject(index) {
   renderAll();
 }
 
-function effortEventsInRange({ allProjects = false, useSource = false } = {}) {
-  if (!EFFORT_EVENTS || !SELECTED_HOSTS.has(EFFORT_HOST)) return [];
-  return EFFORT_EVENTS.filter(e => (allProjects || SELECTED_PROJECTS.has(projectOf(e))) &&
-    (!useSource || !effortUi.source || effortUi.source === e.source) && reportInRange(effortDay(e.timestamp_ms)));
+function effortScopedEvents({ allProjects = false, useSource = false } = {}) {
+  return (EFFORT_EVENTS || []).filter(e => SELECTED_HOSTS.has(effortHostOf(e)) &&
+    (allProjects || SELECTED_PROJECTS.has(projectOf(e))) && (!useSource || !effortUi.source || effortUi.source === e.source));
+}
+
+function effortEventsInRange(filters) {
+  return effortScopedEvents(filters).filter(e => reportInRange(effortDay(e.timestamp_ms)));
 }
 
 function effortScale(from, to) {
@@ -225,20 +236,26 @@ function effortCalendar(scale, from, to, days) {
 
 function renderEffort() {
   effortFilters();
+  const missing = [...SELECTED_HOSTS].filter(host => !EFFORT_HOSTS.has(host)).sort();
+  const unavailable = effortMissingAll();
+  const scope = effortEl("import-scope");
+  scope.hidden = Boolean(RAW.localSourceHost) || !SELECTED_HOSTS.size;
+  scope.innerHTML = t("effort.importScope", { covered: SELECTED_HOSTS.size - missing.length, total: SELECTED_HOSTS.size }) +
+    (missing.length ? ` ${t("effort.missingHosts")} <span class="mask">${escapeHtml(missing.join(", "))}</span>` : "");
   const events = effortEventsInRange({ useSource: true });
   const { days, slots, segments } = effortAggregate(events);
   const [from, to] = reportRange(), scale = effortScale(from, to);
-  const weekBand = scale === "week" ? effortWeekBand(slots / 2) : "";
+  const weekBand = !unavailable && scale === "week" ? effortWeekBand(slots / 2) : "";
 
   effortEl("metrics").innerHTML = [["hours", slots / 2, 1], ["slots", slots], ["events", events.length], ["segments", segments]]
     .map(([key, value, digits]) => {
       const band = key === "hours" ? weekBand : "";
-      return `<div class="effort-metric"${band ? ` data-band="${band}"` : ""}><b id="effort-${key}">${effortFormat(value, digits)}</b><span>${t(band ? "effort.weekHours" : `effort.${key}`)}</span></div>`;
+      return `<div class="effort-metric"${band ? ` data-band="${band}"` : ""}><b id="effort-${key}">${effortFormat(unavailable ? null : value, digits)}</b><span>${t(key === "hours" && scale === "week" ? "effort.weekHours" : `effort.${key}`)}</span></div>`;
     }).join("");
 
   const grid = effortEl("grid");
   grid.dataset.scale = scale;
-  grid.innerHTML = effortCalendar(scale, from, to, days);
+  grid.innerHTML = unavailable ? `<p class="empty">${t("effort.notImported")}</p>` : effortCalendar(scale, from, to, days);
   effortEl("period").textContent = reportDateRange(from, to);
   const [min, max] = reportDataBounds();
   for (const button of effortEl("scales").querySelectorAll("[data-scale]")) {
@@ -253,6 +270,13 @@ function renderEffort() {
     `<span class="effort-legend">${t("effort.legend")} <i style="background:var(--slot-1)"></i> 1–2 <i style="background:var(--slot-2)"></i> 3–5 <i style="background:var(--slot-3)"></i> 6+</span>` : scale === "month" ?
     `<span class="effort-legend effort-band-legend">${t("effort.monthLegend")} ${["green", "yellow", "orange", "red"].map((band, i) => `<span data-band="${band}"><i></i>${t(`effort.band${i + 1}`)}</span>`).join("")}</span>` : "") + (weekBand ?
     `<span class="effort-legend effort-band-legend">${t("effort.weekHours")} ${["green", "yellow", "red"].map((band, i) => `<span data-band="${band}"><i></i>${t(`effort.weekBand${i + 1}`)}</span>`).join("")}</span>` : "");
+
+  if (unavailable) {
+    effortEl("nav").textContent = "";
+    effortEl("project-rank").textContent = "";
+    effortEl("inspector").textContent = "";
+    return;
+  }
 
   const counts = new Map();
   for (const e of effortEventsInRange({ allProjects: true, useSource: true })) {
@@ -281,17 +305,19 @@ function renderEffort() {
 
 function renderEffortDetail() {
   const detail = effortEl("detail");
+  if (effortMissingAll()) { detail.innerHTML = `<p class="empty">${t("effort.notImported")}</p>`; return; }
   if (!SELECTED_DAY) { detail.innerHTML = `<p class="empty">${t("effort.noDay")}</p>`; return; }
   const slot = reportUi.slot;
   const rows = effortEventsInRange({ useSource: true }).filter(e => effortDay(e.timestamp_ms) === SELECTED_DAY && (slot === null || effortSlot(e.timestamp_ms) === slot));
   detail.innerHTML = `<div class="effort-detail-head"><p class="effort-note">${effortCount(rows.length)}</p>
       ${slot === null ? "" : `<button type="button" class="pg-btn" id="effort-clear-slot">${t("effort.wholeDay")}</button>`}</div>
     <div class="effort-events" tabindex="0" role="region" aria-label="${t("effort.drill")}"><table>
-    <thead><tr><th>${t("effort.time")}</th><th>${t("cols.project")}</th><th>${t("cols.session")}</th><th>${t("cols.source")}</th></tr></thead>
+    <thead><tr><th>${t("effort.time")}</th><th>${t("cols.machine")}</th><th>${t("cols.project")}</th><th>${t("cols.session")}</th><th>${t("cols.source")}</th></tr></thead>
     <tbody>${rows.map(e => `<tr><td>${new Date(e.timestamp_ms + REPORT_OFFSET_MS).toISOString().slice(11, 19)}</td>
+      <td><span class="mask">${escapeHtml(effortHostOf(e))}</span></td>
       <td><span class="${projectOf(e) === NO_PROJECT ? "" : "mask"}">${escapeHtml(projectLabel(projectOf(e)))}</span></td>
-      <td><span class="mask">${escapeHtml(sessionNameById(e.session_id) || t("session.untitled"))}</span></td>
-      <td>${escapeHtml(e.source)}${e.file ? ` · <a class="effort-source-link" href="${escapeHtml(vscodeFileUrl(e.file, e.line))}">${t("effort.open")}</a>` : ""}</td></tr>`).join("") || `<tr><td colspan="4" class="empty">${t("effort.empty")}</td></tr>`}</tbody></table></div>`;
+      <td><span class="mask">${escapeHtml(sessionName(e) || t("session.untitled"))}</span></td>
+      <td>${sourceInline(e, "effort.open")}</td></tr>`).join("") || `<tr><td colspan="5" class="empty">${t("effort.empty")}</td></tr>`}</tbody></table></div>`;
 }
 
 effortEl("project-filter").addEventListener("change", e => effortIsolateProject(e.target.value));

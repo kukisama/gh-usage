@@ -135,9 +135,10 @@ winget upgrade gh-usage
 gh-usage
 ```
 
-它会在当前目录生成两个文件：
+默认在当前目录生成三个文件：
 
 - `copilot-usage-<机器名>.csv`——可导入 Excel 做进一步分析
+- `copilot-effort-<机器名>.csv`——已核实的人工提交事件，包含未产生积分的提交
 - `copilot-usage-<机器名>.html`——双击即可查看的报告
 
 ### 3. 打开报告
@@ -180,7 +181,7 @@ gh-usage --format json --output .\reports\copilot-usage.json --no-html
 
 ### 精力时间带与原始记录导出
 
-HTML 默认包含「精力时间」工作表。可在全时段时间轴上框选、平移或拖动两端调整范围。精力支持**年**（各月汇总）、**月**（日历）、**周**（周一至周日）、**日**（48 个半小时格），统一按北京时间（UTC+08:00）划分。点击某天或亮格可在「关联明细」回查人工提交，不改变范围汇总。传入 `--no-effort` 可省略工作表及其事件数据。用量 CSV 不含原始人工提交时间，合并报告不会推算精力。
+有精力数据时，HTML 会显示「精力时间」工作表。可在全时段时间轴上框选、平移或拖动两端调整范围。精力支持**年**（各月汇总）、**月**（日历）、**周**（周一至周日）、**日**（48 个半小时格），统一按北京时间（UTC+08:00）划分。点击某天或亮格可在「关联明细」回查人工提交，不改变范围汇总。传入 `--no-effort` 可跳过精力导出与显示。仅有用量 CSV 无法还原精力槽。
 
 - **月视图**：条长表示占全天 24 小时的比例。每日不足 4 小时为绿，4 至不足 8 小时为黄，8 至不足 12 小时为橙，12 小时及以上为红。
 - **周视图**：总投入不足 30 小时为绿，30 至不足 50 小时为黄，50 小时及以上为红。半小时格仍按触发次数着色。
@@ -189,15 +190,25 @@ HTML 默认包含「精力时间」工作表。可在全时段时间轴上框选
 
 可重复传入 `--effort-project <项目名>`，按项目名精确选取多个项目，对它们的占用格取并集。这个筛选只影响精力报告，不改变 credits 明细，也不按消息判断混合会话里的业务归属。
 
+### 从 CSV 离线重建报告
+
+HTML 报表默认使用「经典」主题，也可在右上角切换为「节奏」布局。**设备线路**把筛选和范围内总量放在顶部，每台机器一行，用同刻度柱形比较用量。明细默认显示最近有记录的时段，也可点击日期或单台机器的柱子，不改变全局筛选或合计。**趋势分析**左侧放机器和项目筛选，中间看多机趋势，右侧放用量分布。图表放不下时可横向拖动。两套布局共用数据、筛选、精力时间和历史请求工作表。要构建不包含新主题的版本，运行 `cargo build --release --no-default-features`。
+
+执行 `gh-usage --no-html` 可只采集和导出，不生成 HTML。请将 `copilot-usage-<机器名>.csv`、`copilot-effort-<机器名>.csv`（如有）和 `copilot-usage-<机器名>.export.json` 一起保留。JSON 校验文件记录机器名和 CSV 校验值。执行 `gh-usage --from-csv copilot-usage-<机器名>.csv` 可离线重建，不读取原始日志。若用量文件自定义为 `report.csv`，配套文件为 `report.effort.csv` 和 `report.export.json`。可用 `--html <路径>` 指定报告位置；JSON 和标准输出用量导出不写配套文件。
+
 ### 合并多台电脑的报告
 
-在每台机器上分别运行 `gh-usage`，把生成的 `copilot-usage-*.csv` 收集到同一文件夹，然后：
+在各台机器上运行 `gh-usage --no-html`，不指定 `--output`，并确保机器名不同（必要时用 `--hostname` 指定）。将每台机器的 `copilot-usage-<机器名>.csv`、`copilot-effort-<机器名>.csv`（如有）和 `copilot-usage-<机器名>.export.json` 收到同一目录。更新时，用本次要纳入汇总的导出替换该机器的整组文件：
 
 ```powershell
 gh-usage --merge .\shared\copilot-usage
 ```
 
-它会读取所有 CSV、对同一机器上的相同记录去重，按新版用量与历史请求分别展示机器汇总。旧 CSV 没有机器名时，按各自的 `copilot-usage-<机器名>.csv` 文件名回填。导出中 `credits` 和 `request_count` 分开存放，`unclassified_usage` 仅供核对。
+目录合并每台机器只读取一组标准文件，不拼接同机历史快照，也不按文件修改时间挑选。自定义文件请用 `--from-csv` 单独查看。旧用量 CSV 若没有记录机器名，只能依赖文件名识别机器；请保留原名，改名的旧备份不要放在合并目录。精力 CSV 没有配套校验文件时，请重新导出，或用 `--no-effort` 只生成用量报告。不同机器的记录各自保留，AI 积分和历史请求仍分开统计。
+
+精力页按北京时间划分半小时格，同一格跨机器只算一次。缺失的精力数据不计作零；没有导入任何精力 CSV 时，不显示精力工作表。配套 CSV 存在但校验不匹配时会报错，不会悄悄生成部分报告。
+
+本机直接采集生成的报告可在 VS Code 中打开源文件和对应行。使用 `--from-csv` 或 `--merge` 生成的离线报告只显示来源名称，不提供打开或复制路径入口。这不等于删除路径：导出文件仍可能包含源路径。
 
 追加 `--view` 即可立即打开合并报告：`gh-usage --merge .\shared\copilot-usage --view`。可以通过 `--html <PATH>` 指定合并报告位置；相对路径以当前工作目录为基准。
 
@@ -206,6 +217,8 @@ gh-usage --merge .\shared\copilot-usage
 ## 📄 CSV 字段
 
 每行对应一条来源记录，包含机器、时间、会话、模型、源文件和行号等字段。`credits` 存 AI 积分，`request_count` 存可核实的历史原始次数，`unclassified_usage` 存仅供核对的旧值。这些字段不相加；历史次数按来源比较。CSV 默认带 UTF-8 BOM，方便 Windows Excel 直接打开（用 `--no-bom` 可关闭）。
+
+精力 CSV 每行是一条已核实的人工提交：`hostname`、`timestamp_ms`（提交时间，UTC Unix 毫秒）、`source`、可为空的 `project`、`session_id`，以及可取得的 `event_id`。`file` 和 `line` 保留来源索引，文件不含聊天正文。对外分享前请留意机器名、项目名及文件路径；离线重建不需要访问这些源文件。
 
 ---
 
@@ -232,8 +245,9 @@ gh-usage --merge .\shared\copilot-usage
 --no-html                 不生成 HTML 报告
 --effort-report <PATH>    另存本地人工触发的半小时精力报告（Markdown）
 --effort-project <NAME>   按精确项目名筛选 Markdown 精力报告（可重复）
---no-effort               从 HTML 中省略精力时间工作表及其数据
---merge [DIR]             合并已有的 copilot-usage-*.csv 为一份报告
+--no-effort               跳过精力 CSV 导出和精力工作表展示
+--from-csv <CSV>          从一份用量 CSV 和配套精力 CSV 重建 HTML
+--merge [DIR]             将多台机器的用量和精力 CSV 合成离线报告
 --format csv|json         选择输出格式
 --hostname <NAME>         覆盖记录中保存的机器名
 ```

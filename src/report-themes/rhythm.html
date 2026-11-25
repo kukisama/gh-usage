@@ -1,0 +1,100 @@
+<template id="rhythm-theme-controls">
+  <label class="rhythm-theme-switch">
+    <span data-rhythm-text="theme">Theme</span>
+    <select data-rhythm-control aria-label="Theme">
+      <option value="classic" data-rhythm-text="classic">Classic</option>
+      <option value="rhythm" data-rhythm-text="rhythm">Rhythm</option>
+    </select>
+  </label>
+</template>
+<template id="rhythm-theme-layout">
+<main id="rhythm-shell" class="report-workspace" hidden>
+  <div class="rhythm-shell-head">
+    <div>
+      <p class="rhythm-kicker">GH USAGE / RHYTHM</p>
+      <h2 data-rhythm-workspace-title data-rhythm-text="workspace">Rhythm workspace</h2>
+    </div>
+    <div data-rhythm-slot="tabs"></div>
+  </div>
+  <div class="rhythm-overview" data-rhythm-overview>
+    <div><span data-rhythm-text="usage">Usage in range</span><div class="rhythm-total"><strong data-rhythm-summary></strong><small data-rhythm-unit></small></div></div>
+    <div class="rhythm-activity"><span data-rhythm-summary></span><span data-rhythm-text="rows">Turns / summaries</span><span data-rhythm-summary></span><span data-rhythm-text="days">Active days</span></div>
+  </div>
+  <div class="rhythm-toolbar">
+    <div class="rhythm-view-switch" role="group" data-rhythm-label="view">
+      <button type="button" class="pg-btn" data-rhythm-view="atlas" data-rhythm-text="atlas">Device atlas</button>
+      <button type="button" class="pg-btn" data-rhythm-view="trend" data-rhythm-text="trend">Trend analysis</button>
+    </div>
+    <details class="rhythm-popover" data-rhythm-drop="date"><summary><span data-rhythm-text="date">Date</span><b data-rhythm-range></b></summary><div data-rhythm-slot="date"></div></details>
+    <details class="rhythm-popover" data-rhythm-drop="machines"><summary><span data-rhythm-text="machines">Machines</span><b data-rhythm-count="hosts"></b></summary><div data-rhythm-slot="machines"></div></details>
+    <details class="rhythm-popover" data-rhythm-drop="projects"><summary><span data-rhythm-text="projects">Projects</span><b data-rhythm-count="projects"></b></summary><div data-rhythm-slot="projects"></div></details>
+    <details class="rhythm-popover" data-rhythm-drop="pricing"><summary data-rhythm-text="settings">Billing options</summary><div data-rhythm-slot="pricing"></div></details>
+    <div data-rhythm-slot="effort-link"></div>
+  </div>
+  <div data-rhythm-slot="filters"></div>
+  <div class="rhythm-layout">
+    <section class="rhythm-trend-filters" aria-labelledby="rhythm-filter-title">
+      <h3 id="rhythm-filter-title" data-rhythm-text="filters">Scope</h3>
+      <h4 data-rhythm-text="machines">Machines</h4>
+      <div data-rhythm-slot="trend-machines"></div>
+      <h4 data-rhythm-text="projects">Projects</h4>
+      <div data-rhythm-slot="trend-projects"></div>
+    </section>
+    <div class="rhythm-content">
+    <div data-rhythm-chart-home>
+  <div class="rhythm-panel" hidden>
+    <section class="rhythm-plot" aria-labelledby="rhythm-title">
+    <header class="rhythm-heading">
+      <div>
+        <h3 id="rhythm-title" data-rhythm-text="title">Device routes</h3>
+        <p class="rhythm-caption" data-rhythm-caption></p>
+      </div>
+    </header>
+    <div class="rhythm-scroll" role="region" aria-labelledby="rhythm-title" tabindex="0">
+      <div class="rhythm-board"></div>
+    </div>
+    <p class="rhythm-hint" data-rhythm-text="scroll" hidden>Drag or swipe to see more dates</p>
+    </section>
+    <section class="rhythm-inspector" aria-labelledby="rhythm-focus-title">
+      <div class="rhythm-inspector-heading">
+        <div>
+          <p class="rhythm-kicker" data-rhythm-text="periodDetail">Period details</p>
+          <h4 id="rhythm-focus-title" data-rhythm-focus aria-live="polite"></h4>
+        </div>
+        <div class="rhythm-period-nav">
+          <button type="button" class="pg-btn" data-rhythm-step="-1" data-rhythm-label="previous">‹</button>
+          <button type="button" class="pg-btn" data-rhythm-step="1" data-rhythm-label="next">›</button>
+        </div>
+      </div>
+      <div class="rhythm-inspector-total" data-rhythm-subtotal hidden><strong></strong><span data-rhythm-unit></span></div>
+      <p class="rhythm-caption" data-rhythm-note></p>
+      <div class="rhythm-comparison" data-rhythm-comparison hidden></div>
+      <div class="rhythm-records" hidden>
+        <table>
+          <thead><tr>
+            <th scope="col" data-rhythm-text="time">Beijing time</th>
+            <th scope="col" data-rhythm-text="machines">Machines</th>
+            <th scope="col" data-rhythm-text="project">Project</th>
+            <th scope="col" data-rhythm-text="model">Model</th>
+            <th scope="col" data-rhythm-unit></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+    </div>
+      <div data-rhythm-slot="sheets"></div>
+      <div data-rhythm-slot="details"></div>
+    </div>
+    <details class="rhythm-atlas-distribution">
+      <summary data-rhythm-text="breakdown">Usage breakdown</summary>
+      <div data-rhythm-slot="atlas-breakdown"></div>
+    </details>
+    <section class="rhythm-trend-distribution" aria-labelledby="rhythm-breakdown-title">
+      <h3 id="rhythm-breakdown-title" data-rhythm-text="breakdown">Usage breakdown</h3>
+      <div data-rhythm-slot="trend-breakdown"></div>
+    </section>
+  </div>
+</main>
+</template>

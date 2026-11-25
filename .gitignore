@@ -21,6 +21,9 @@ SKILL.md
 *.skill.md
 
 copilot-usage*
+copilot-effort-*.csv
+*.effort.csv
+*.export.json
 
 # Synthetic CSVs used by the multi-machine merge tests.
 !/scripts/fixtures/merge-billing/copilot-usage-desk.csv

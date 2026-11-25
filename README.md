@@ -135,9 +135,10 @@ Run it from your terminal:
 gh-usage
 ```
 
-It writes two files to the current directory:
+By default it writes three files to the current directory:
 
 - `copilot-usage-<machine>.csv` — import into Excel for deeper analysis
+- `copilot-effort-<machine>.csv` — verified human submission events, including submissions with no recorded credits
 - `copilot-usage-<machine>.html` — the report you open with a double-click
 
 ### 3. Open the report
@@ -180,7 +181,7 @@ gh-usage --format json --output .\reports\copilot-usage.json --no-html
 
 ### Effort timeline and audit export
 
-The HTML report includes the **Effort time** sheet by default. Drag the overview to select or move a range, or drag its handles to resize it. Effort supports **Year** (monthly totals), **Month** (calendar), **Week** (Monday–Sunday), and **Day** (48 half-hour slots), all in Beijing time (UTC+08:00). Select a day or occupied slot to inspect the underlying submissions without changing the range totals. Pass `--no-effort` to omit the sheet and its data. Merged usage CSVs have no human submission timestamps, so merged HTML does not infer effort.
+The HTML report includes the **Effort time** sheet when effort data is available. Drag the overview to select or move a range, or drag its handles to resize it. Effort supports **Year** (monthly totals), **Month** (calendar), **Week** (Monday–Sunday), and **Day** (48 half-hour slots), all in Beijing time (UTC+08:00). Select a day or occupied slot to inspect the underlying submissions without changing the range totals. Pass `--no-effort` to skip effort export and display. Usage CSV alone cannot reconstruct effort.
 
 - **Month:** bar length is the share of a 24-hour day. Daily effort is green below 4 hours, yellow from 4 to under 8, orange from 8 to under 12, and red at 12 hours or more.
 - **Week:** the total is green below 30 hours, yellow from 30 to under 50, and red at 50 hours or more. The half-hour cells still show the number of submissions.
@@ -189,15 +190,25 @@ Use `gh-usage --since-days 7 --effort-report effort.md` to also write a Markdown
 
 Repeat `--effort-project <NAME>` to combine exact project names in the effort report. The calculation uses the union of their slots, and the credits export is unchanged. A project filter does not classify messages within a mixed-topic session.
 
+### Rebuild a report offline
+
+The HTML report defaults to Classic. Choose Rhythm in the top-right theme control to switch layouts. **Device atlas** places filters and the range total above a grid of machine rows with bars on a shared scale. The detail panel opens on the latest period with records; select a date or a machine's bar to change the preview without changing global filters or totals. **Trend analysis** puts machine and project filters on the left, per-machine trends in the center, and the breakdown on the right. Drag sideways when the chart does not fit. The themes share the same data, filters, effort and historical request sheets. To build without the optional theme, run `cargo build --release --no-default-features`.
+
+Run `gh-usage --no-html` to export without rendering. Keep `copilot-usage-<machine>.csv`, `copilot-effort-<machine>.csv` (if exported), and `copilot-usage-<machine>.export.json` together. The small JSON receipt identifies the machine and verifies that the CSVs match the export. Run `gh-usage --from-csv copilot-usage-<machine>.csv` to rebuild offline without rescanning logs. For a custom `report.csv`, the companion files are `report.effort.csv` and `report.export.json`. `--html <PATH>` sets the report output. JSON and stdout usage exports do not write companion files.
+
 ### Merge reports from multiple machines
 
-Run `gh-usage` on each machine, collect the `copilot-usage-*.csv` files into one folder, then:
+Run `gh-usage --no-html` without `--output` on each machine, and give the machines distinct names (override with `--hostname` if needed). Collect each machine's `copilot-usage-<machine>.csv`, `copilot-effort-<machine>.csv` (if available), and `copilot-usage-<machine>.export.json` in one folder. To refresh a machine's data, replace that set with the latest export you want to report:
 
 ```powershell
 gh-usage --merge .\shared\copilot-usage
 ```
 
-It reads every CSV, deduplicates matching rows on the same machine, and produces independent current-usage and historical-request views. If an older CSV lacks a hostname, its `copilot-usage-<machine>.csv` filename supplies it. `credits` and `request_count` are separate fields; `unclassified_usage` is audit-only.
+The merge uses one standard-named snapshot per machine; it never combines older snapshots for the same machine or picks one using modification times. Use `--from-csv` to view custom-named archives separately. For older usage-only CSVs without a recorded hostname, the filename identifies the machine: keep the original filename and store renamed archives outside the merge folder. Effort CSVs without a matching receipt are not imported; re-export them or pass `--no-effort` for a usage-only report. AI credits and historical requests remain separate; different machines' records are preserved.
+
+On the effort sheet, each Beijing-time half-hour slot counts once across the selected machines. Missing effort data is not counted as zero, and the sheet is omitted when no effort CSV is imported. A present but mismatched companion is an error, not partial coverage.
+
+Reports generated directly from local logs can open source files and lines in VS Code. Reports rebuilt with `--from-csv` or `--merge` show source labels without open or copy-path actions. This is not path redaction: the exports can still contain source paths.
 
 Add `--view` to open the merged report immediately: `gh-usage --merge .\shared\copilot-usage --view`. Use `--html <PATH>` to override the merged HTML destination; relative paths are resolved from the current working directory.
 
@@ -206,6 +217,8 @@ Add `--view` to open the merged report immediately: `gh-usage --merge .\shared\c
 ## 📄 CSV fields
 
 Each row is one source usage record. Alongside machine, time, session, model, and source file/line, `credits` holds AI credits, `request_count` holds original historical counts when available, and `unclassified_usage` preserves values for audit only. Do not add these fields together; compare historical counts within the same source. The CSV includes a UTF-8 BOM by default so Windows Excel opens it cleanly (use `--no-bom` to turn it off).
+
+The separate effort CSV has one row per verified human submission: `hostname`, `timestamp_ms` (submission time, UTC Unix milliseconds), `source`, optional `project`, `session_id`, and `event_id` when available. `file` and `line` retain the original source location for audit; the CSV does not contain chat text. Review machine names, project names and file paths before sharing. Offline reconstruction does not need the referenced files.
 
 ---
 
@@ -232,8 +245,9 @@ Each row is one source usage record. Alongside machine, time, session, model, an
 --no-html                Do not generate the HTML report
 --effort-report <PATH>   Also write a Markdown report of local human effort slots
 --effort-project <NAME>  Limit the Markdown effort report to exact project names (repeatable)
---no-effort              Omit the Effort time sheet and its data from HTML
---merge [DIR]            Merge existing copilot-usage-*.csv files into one report
+--no-effort              Skip effort CSV export and omit the Effort time sheet
+--from-csv <CSV>         Rebuild HTML from one usage CSV and its companion
+--merge [DIR]            Merge usage and effort CSVs into one offline report
 --format csv|json        Choose the output format
 --hostname <NAME>        Override the machine name stored in records
 ```

@@ -41,6 +41,7 @@ Object.assign(I18N.en, {
   "sheet.toEffort": "View effort on the selected day →", "sheet.toUsage": "View usage on the selected day →",
   "sheet.noDates": "No dated records", "sheet.dateZone": "Beijing time · UTC+08:00",
   "sheet.monthly": "Monthly totals", "sheet.dayTotals": "Daily totals", "sheet.focus": "Selected day",
+  "sheet.chartPan": "Drag or swipe sideways to see more months",
   "cols.timeLocal": "Time (UTC+08:00)",
   "ledger.credits": "AI credits",
   "ledger.noMoney": "Currency estimates apply only to GitHub AI Credits.",
@@ -58,6 +59,7 @@ Object.assign(I18N.zh, {
   "sheet.toEffort": "查看当天精力 →", "sheet.toUsage": "查看当天用量 →",
   "sheet.noDates": "没有带日期的记录", "sheet.dateZone": "北京时间 · UTC+08:00",
   "sheet.monthly": "按月汇总", "sheet.dayTotals": "按日汇总", "sheet.focus": "选中日期",
+  "sheet.chartPan": "左右拖动或滑动，查看更多月份",
   "cols.timeLocal": "时间（北京时间）",
   "ledger.credits": "AI 积分",
   "ledger.noMoney": "金额估算仅适用于 GitHub AI Credits。",
@@ -125,14 +127,18 @@ function renderHistory() {
   reportEl("history-table").tHead.innerHTML = `<tr>${["cols.timeLocal", "cols.machine", "cols.project", "cols.model", `history.${historyUi.source}`, "cols.source"].map(key => `<th>${t(key)}</th>`).join("")}</tr>`;
   reportEl("history-table").tBodies[0].innerHTML = detailRows.slice((historyUi.page - 1) * pageSize, historyUi.page * pageSize).map(r => `<tr><td>${fmtDateTime(r.timestamp_ms)}</td>
     <td><span class="mask">${escapeHtml(r.hostname || EFFORT_HOST)}</span></td><td><span class="mask">${escapeHtml(projectLabel(projectOf(r)))}</span></td>
-    <td>${escapeHtml(r.model)}</td><td class="num">${fmtNum(billingNumber(r), audit ? 2 : 0)}</td><td>${escapeHtml(r.source)}${r.file ? ` · <a class="effort-source-link" href="${escapeHtml(vscodeFileUrl(r.file, r.line))}">${t("source.open")}</a>` : ""}</td></tr>`).join("")
+    <td>${escapeHtml(r.model)}</td><td class="num">${fmtNum(billingNumber(r), audit ? 2 : 0)}</td><td>${sourceInline(r, "source.open")}</td></tr>`).join("")
     || `<tr><td colspan="6" class="empty">${t("empty.records")}</td></tr>`;
   reportEl("history-pages").innerHTML = pages > 1 ? `<button class="pg-btn" type="button" data-history-page="-1" ${historyUi.page === 1 ? "disabled" : ""}>${t("pagination.prev")}</button>
     <span>${t("pagination.page", { current: historyUi.page, total: pages })}</span><button class="pg-btn" type="button" data-history-page="1" ${historyUi.page === pages ? "disabled" : ""}>${t("pagination.next")}</button>` : "";
 }
 
 function reportRange() {
-  const [min, max] = reportDataBounds();
+  const bounds = reportDataBounds();
+  // Usage and effort share a selected day, but may have disjoint log ranges.
+  // Include the selection in implicit bounds without changing explicit filters.
+  const [min, max] = reportUi.sheet !== "history" && SELECTED_DAY
+    ? observedBounds([...bounds, SELECTED_DAY]) : bounds;
   const from = DATE_FROM || min || DATE_TO;
   const to = DATE_TO || max || DATE_FROM;
   return [DATE_FROM ? from : from < to ? from : to, DATE_TO ? to : to > from ? to : from];
@@ -220,8 +226,7 @@ function reportCalendarDomain() {
   const [min, max] = reportDataBounds();
   if (!min || !max) return null;
   if (reportUi.sheet === "history") return [dayNumber(min), dayNumber(max)];
-  const low = [min, DATE_FROM, DATE_TO].filter(Boolean).sort()[0];
-  const high = [max, DATE_FROM, DATE_TO].filter(Boolean).sort().at(-1);
+  const [low, high] = observedBounds([min, max, DATE_FROM, DATE_TO, SELECTED_DAY]);
   return [dayNumber(calendarPeriod(low, "year")[0]), dayNumber(calendarPeriod(high, "year")[1])];
 }
 
@@ -257,15 +262,15 @@ function renderTimeNavigator() {
   const bin = d => Math.floor((dayNumber(d) - domain[0]) / span * n);
   const effort = reportUi.sheet === "effort";
   const history = reportUi.sheet === "history";
-  if (effort && SELECTED_HOSTS.has(EFFORT_HOST)) {
+  if (effort) {
     const counted = new Set();
-    for (const e of EFFORT_EVENTS || []) {
-      if (!SELECTED_PROJECTS.has(projectOf(e))) continue;
-      if (effortUi.source && e.source !== effortUi.source) continue;
-      const slot = Math.floor(e.timestamp_ms / 1800000);
+    for (const e of effortScopedEvents({ useSource: true })) {
+      const day = effortDay(e.timestamp_ms);
+      if (!day) continue;
+      const slot = `${day}:${effortSlot(e.timestamp_ms)}`;
       if (counted.has(slot)) continue;
       counted.add(slot);
-      values[bin(effortDay(e.timestamp_ms))]++;
+      values[bin(day)]++;
     }
   } else if (history && historyUi.source !== "audit") {
     for (const r of historyRows(false)) if (dayKey(r.timestamp_ms)) values[bin(dayKey(r.timestamp_ms))] += r.request_count;
@@ -284,7 +289,7 @@ function renderTimeNavigator() {
   const mode = effort ? "effort" : history ? (historyUi.source === "audit" ? "unclassified" : "requests") : "credits";
   reportEl("time-nav-title").textContent = `${t("sheet.history")} · ${t(effort ? "effort.slots" : history ? `history.${historyUi.source}` : "ledger.credits")}`;
   reportEl("time-spark").innerHTML = `<svg viewBox="0 0 1000 44" preserveAspectRatio="none" aria-hidden="true">
-    ${mode === "unclassified" ? "" : `<polyline class="nav-${mode}" points="${points()}"/>`}</svg>`;
+    ${mode === "unclassified" || (effort && effortMissingAll()) ? "" : `<polyline class="nav-${mode}" points="${points()}"/>`}</svg>`;
   const years = Number(dayFromNumber(domain[1]).slice(0, 4)) - Number(dayFromNumber(domain[0]).slice(0, 4)) + 1;
   const monthsPerTick = years === 1 ? 1 : years === 2 ? 3 : 12 * Math.ceil(years / 8);
   let ticks = "";
@@ -297,7 +302,55 @@ function renderTimeNavigator() {
   paintTimeWindow(domain, ...reportBrushBounds(domain));
 }
 
+function syncUsageChartOverflow(chart) {
+  const scrollable = chart.scrollWidth > chart.clientWidth;
+  chart.classList.toggle("is-scrollable", scrollable);
+  reportEl("daily-chart-pan-hint").hidden = !scrollable;
+}
+
+function bindUsageChartPan(chart, { surface = "svg.chart", onResize = () => syncUsageChartOverflow(chart) } = {}) {
+  let drag = null;
+  let suppressClick = false;
+  const stop = e => {
+    if (drag?.id !== e.pointerId) return;
+    drag = null;
+    chart.classList.remove("is-panning");
+  };
+  chart.addEventListener("pointerdown", e => {
+    if (!e.isPrimary) return;
+    suppressClick = false;
+    if (e.pointerType === "touch" || e.button !== 0 || chart.scrollWidth <= chart.clientWidth
+        || !e.target.closest(surface)) return;
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY, left: chart.scrollLeft, active: false };
+  });
+  chart.addEventListener("pointermove", e => {
+    if (drag?.id !== e.pointerId) return;
+    const dx = e.clientX - drag.x;
+    if (!drag.active) {
+      if (Math.abs(dx) < 5) return;
+      if (Math.abs(e.clientY - drag.y) > Math.abs(dx)) { stop(e); return; }
+      drag.active = suppressClick = true;
+      chart.setPointerCapture(e.pointerId);
+      chart.classList.add("is-panning");
+    }
+    chart.scrollLeft = drag.left - dx;
+  });
+  chart.addEventListener("pointerleave", e => { if (!drag?.active) stop(e); });
+  chart.addEventListener("pointerup", stop);
+  chart.addEventListener("pointercancel", stop);
+  chart.addEventListener("lostpointercapture", stop);
+  chart.addEventListener("click", e => {
+    if (suppressClick && e.detail > 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      suppressClick = false;
+    }
+  }, true);
+  new ResizeObserver(onResize).observe(chart);
+}
+
 function bindReportSheets() {
+  bindUsageChartPan(reportEl("daily-chart"));
   reportEl("sheet-tabs").addEventListener("click", e => {
     const tab = e.target.closest("[data-sheet]");
     if (tab) reportSwitchSheet(tab.dataset.sheet);

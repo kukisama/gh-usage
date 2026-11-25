@@ -12,6 +12,10 @@ readme = "README.md"
 name = "gh-usage"
 path = "src/main.rs"
 
+[features]
+default = ["rhythm-theme"]
+rhythm-theme = []
+
 [dependencies]
 anyhow = "1.0"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
@@ -23,6 +27,7 @@ rayon = "1.10"
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
+sha2 = "0.10"
 walkdir = "2.5"
 
 [target.'cfg(windows)'.dependencies]

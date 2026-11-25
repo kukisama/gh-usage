@@ -1,33 +1,14 @@
 //! Local human submissions, independent of credits and response timings.
 
 use std::collections::{BTreeMap, HashSet};
-use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::fs::OpenOptions;
+use std::io::{BufWriter, Write};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, FixedOffset, NaiveDate, Timelike, Utc};
-use serde_json::{Value, value::RawValue};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Kind {
-    Human,
-    Automatic,
-    Unverified,
-    Queued,
-}
-
-#[derive(Debug)]
-pub(super) struct Event {
-    pub source: &'static str,
-    pub session: String,
-    pub id: Option<String>,
-    pub project: Option<String>,
-    pub timestamp_ms: Option<i64>,
-    pub file: PathBuf,
-    pub line: usize,
-    pub kind: Kind,
-}
+use crate::record::{EffortEvent as Event, EffortKind as Kind, EffortRow};
 
 fn text(v: &str) -> String {
     v.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
@@ -73,57 +54,6 @@ fn clock(slot: u32) -> String {
     if slot == 48 { "次日00:00".into() } else { format!("{:02}:{:02}", slot / 2, slot % 2 * 30) }
 }
 
-pub(super) fn scan_cli(root: &Path) -> Vec<Event> {
-    let Ok(entries) = fs::read_dir(root.join("session-state")) else { return Vec::new() };
-    let mut events = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path().join("events.jsonl");
-        let Ok(file) = File::open(&path) else { continue };
-        let session = entry.file_name().to_string_lossy().into_owned();
-        let project = super::read_cli_workspace_metadata(&entry.path()).project;
-        for (line, bytes) in BufReader::new(file).split(b'\n').enumerate() {
-            let Ok(bytes) = bytes else { break };
-            if !super::contains_bytes(&bytes, b"user.message") { continue }
-            // Do not decode the message body. Some providers write JS strings
-            // that cannot be decoded as Rust UTF-8 text.
-            #[derive(serde::Deserialize)]
-            struct UserEvent<'a> {
-                #[serde(rename = "type")]
-                event_type: String,
-                id: Option<String>,
-                timestamp: Option<String>,
-                #[serde(rename = "agentId")]
-                agent_id: Option<String>,
-                #[serde(borrow)]
-                data: Option<&'a RawValue>,
-            }
-            #[derive(serde::Deserialize)]
-            struct Message<'a> {
-                #[serde(borrow)]
-                content: Option<&'a RawValue>,
-                source: Option<Value>,
-            }
-            let Ok(event) = serde_json::from_slice::<UserEvent>(&bytes) else { continue };
-            if event.event_type != "user.message" { continue }
-            let data = event.data.and_then(|raw| serde_json::from_str::<Message>(raw.get()).ok());
-            let kind = if event.agent_id.as_deref().is_some_and(|id| !id.is_empty())
-                || data.as_ref().is_some_and(|data| data.source.is_some()) {
-                Kind::Automatic
-            } else if data.and_then(|data| data.content).is_some() {
-                Kind::Human
-            } else {
-                Kind::Unverified
-            };
-            events.push(Event {
-                source: "Copilot CLI", session: session.clone(), id: event.id,
-                project: project.clone(), timestamp_ms: event.timestamp.as_deref().and_then(super::parse_rfc3339_timestamp_ms),
-                file: path.clone(), line: line + 1, kind,
-            });
-        }
-    }
-    events
-}
-
 pub(super) struct Scope<'a> {
     pub since: Option<i64>,
     pub until: i64,
@@ -161,22 +91,13 @@ pub(super) fn prepare_events(mut events: Vec<Event>, since: Option<i64>, until: 
     events
 }
 
-#[derive(serde::Serialize)]
-pub(super) struct HtmlEvent<'a> {
-    timestamp_ms: i64,
-    source: &'a str,
-    session_id: &'a str,
-    project: Option<&'a str>,
-    file: std::borrow::Cow<'a, str>,
-    line: usize,
-}
-
-pub(super) fn html_events(events: &[Event]) -> Vec<HtmlEvent<'_>> {
+pub(super) fn export_rows(events: &[Event], hostname: &str) -> Vec<EffortRow> {
     events.iter().filter_map(|e| {
         let time = e.timestamp_ms.and_then(china_time)?;
-        (e.kind == Kind::Human).then(|| HtmlEvent {
-            timestamp_ms: time.timestamp_millis(), source: e.source, session_id: &e.session,
-            project: e.project.as_deref(), file: e.file.to_string_lossy(), line: e.line,
+        (e.kind == Kind::Human).then(|| EffortRow {
+            hostname: hostname.to_owned(), timestamp_ms: time.timestamp_millis(), source: e.source.to_owned(),
+            session_id: e.session.clone(), event_id: e.id.clone(), project: e.project.clone(),
+            file: e.file.to_string_lossy().into_owned(), line: e.line,
         })
     }).collect()
 }
@@ -262,14 +183,17 @@ pub(super) fn end_of_collection() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::temporary_root;
+    use crate::time::parse_rfc3339_timestamp_ms;
+    use std::fs;
 
     #[test]
     fn effort_report_keeps_raw_events_and_deduplicates_slots_across_sources() {
-        let root = super::super::tests::temporary_cli_root("effort");
+        let root = temporary_root("effort");
         let report = root.join("report.md");
         let make = |id: &str, time: &str, source, kind| Event {
             source, session: source.into(), id: Some(id.into()), project: Some(source.into()),
-            timestamp_ms: super::super::parse_rfc3339_timestamp_ms(time), file: root.join("events.jsonl"), line: 1, kind,
+            timestamp_ms: parse_rfc3339_timestamp_ms(time), file: root.join("events.jsonl"), line: 1, kind,
         };
         let events = vec![
             make("a", "2026-11-23T08:29:59.999+08:00", "VS Code", Kind::Human),
@@ -281,7 +205,7 @@ mod tests {
             make("e", "2026-11-24T00:00:00+08:00", "Copilot CLI", Kind::Human),
         ];
         let events = prepare_events(events, None, 1_900_000_000_000);
-        assert_eq!(html_events(&events).len(), 5);
+        assert_eq!(export_rows(&events, "test-host").len(), 5);
         write_report(&report, &events, Scope { since: None, until: 1_900_000_000_000,
             vscode_root: &root, cli_root: Some(&root), parse_errors: 0, limited_files: None,
             projects: &["VS Code".into(), "Copilot CLI".into()] }).unwrap();

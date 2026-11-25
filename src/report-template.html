@@ -112,6 +112,9 @@
   .chip.model { color: var(--accent2); }
 
   svg.chart { display: block; }
+  #daily-chart { overflow-x: auto; overscroll-behavior-x: contain; }
+  #daily-chart.is-scrollable svg { cursor: grab; user-select: none; }
+  #daily-chart.is-panning, #daily-chart.is-panning svg { cursor: grabbing; }
   .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; font-size: 12px; color: var(--text-dim); }
   .legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
 
@@ -318,6 +321,7 @@
   .col-filter .cf-list .cf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .col-filter .cf-list .cf-count { margin-left: auto; color: var(--text-dim); font-size: 11px; }
 __GH_USAGE_EFFORT_STYLE__
+__GH_USAGE_THEME_STYLE__
 </style>
 </head>
 <body>
@@ -327,7 +331,7 @@ __GH_USAGE_EFFORT_STYLE__
     <h1 data-i18n="app.title">gh-usage report</h1>
     <span class="meta">
       <span data-i18n="header.generated">Generated</span> <span id="generated-at">—</span>
-      · <span id="summary-line"></span>
+      <span class="report-header-summary">· <span id="summary-line"></span></span>
     </span>
   </div>
   <div class="right">
@@ -370,7 +374,7 @@ __GH_USAGE_EFFORT_STYLE__
   </div>
 </header>
 
-<main>
+<main id="classic-report">
   <aside>
     <h2 data-i18n="aside.machines">Machines</h2>
     <ul id="machine-list" class="machine-list"></ul>
@@ -481,13 +485,14 @@ __GH_USAGE_EFFORT_STYLE__
     </div>
 
     <div class="grid-2 usage-grid">
-      <div class="card">
+      <div class="card" id="classic-usage-chart">
         <h3 id="daily-chart-title" data-i18n="charts.daily">Daily credits (stacked by machine)</h3>
         <div id="daily-chart"></div>
+        <p id="daily-chart-pan-hint" class="delta" data-i18n="sheet.chartPan" hidden></p>
         <div id="daily-legend" class="legend"></div>
         <button type="button" class="pg-btn cross-link" data-jump-sheet="effort" data-i18n="sheet.toEffort" hidden></button>
       </div>
-      <div class="card">
+      <div class="card" id="usage-distribution">
         <div class="segmented" id="usage-breakdown" role="group" data-i18n-attr='{"aria-label":"sheet.breakdown"}'>
           <button type="button" data-breakdown="model" data-i18n="cols.model"></button>
           <button type="button" data-breakdown="project" data-i18n="cols.project"></button>
@@ -530,6 +535,7 @@ __GH_USAGE_EFFORT_STYLE__
         </div>
       </div>
       <p class="effort-note" data-i18n="effort.rule"></p>
+      <p class="effort-note" id="effort-import-scope"></p>
       <div id="effort-metrics" class="effort-metrics"></div>
       <div class="effort-layout">
         <div class="effort-plot">
@@ -640,6 +646,7 @@ __GH_USAGE_EFFORT_STYLE__
 </footer>
 
 <script>__GH_USAGE_SNAPDOM__</script>
+__GH_USAGE_THEME_TEMPLATE__
 <script id="gh-usage-data" type="application/json">__GH_USAGE_DATA__</script>
 
 <script>
@@ -953,7 +960,8 @@ __GH_USAGE_EFFORT_STYLE__
   const HISTORY = Array.isArray(RAW.history) ? RAW.history : [];
   const EFFORT_HOST = RAW.primaryHost || "unknown-host";
   const EFFORT_EVENTS = Array.isArray(RAW.effort) ? RAW.effort : null;
-  const HOSTS = Array.from(new Set([...RECORDS.map(r => r.hostname || EFFORT_HOST), ...HISTORY.map(r => r.hostname || EFFORT_HOST), ...(EFFORT_EVENTS?.length ? [EFFORT_HOST] : [])])).sort();
+  const EFFORT_HOSTS = new Set(RAW.effortHosts || (EFFORT_EVENTS ? [EFFORT_HOST] : []));
+  const HOSTS = Array.from(new Set([...RECORDS.map(r => r.hostname || EFFORT_HOST), ...HISTORY.map(r => r.hostname || EFFORT_HOST), ...EFFORT_HOSTS, ...(RAW.importedHosts || [])])).sort();
   const HOST_COLOR = Object.fromEntries(HOSTS.map((h, i) => [h, PALETTE[i % PALETTE.length]]));
   const SOURCES = Array.from(new Set(RECORDS.map(r => r.source))).sort();
   const MODELS = Array.from(new Set(RECORDS.map(r => r.model).filter(Boolean))).sort();
@@ -973,43 +981,45 @@ __GH_USAGE_EFFORT_STYLE__
   // Friendly parent-session names from the chat title, so rows of the same
   // session read as one group (e.g. "开发设计m1到m5 · round 8/8"). Repeated
   // titles get a "#n" suffix so distinct sessions stay tellable apart.
+  const sessionKey = r => r.session_id ? JSON.stringify([r.hostname || EFFORT_HOST, r.session_id]) : "";
   const SESSION_NAME = (() => {
-    const meta = {}; // sid -> { title, firstTs }
-    for (const r of RECORDS) {
-      const sid = r.session_id;
-      if (!sid) continue;
+    const meta = new Map();
+    for (const r of [...RECORDS, ...HISTORY]) {
+      const key = sessionKey(r);
+      if (!key) continue;
       const ts = r.timestamp_ms || 0;
-      if (!meta[sid]) meta[sid] = { title: "", firstTs: ts };
-      if (ts < meta[sid].firstTs) meta[sid].firstTs = ts;
+      if (!meta.has(key)) meta.set(key, { title: "", firstTs: ts });
+      const entry = meta.get(key);
+      entry.firstTs = Math.min(entry.firstTs, ts);
       const title = (r.chat_title || "").trim();
-      if (title && !meta[sid].title) meta[sid].title = title;
+      if (title && !entry.title) entry.title = title;
     }
-    const byTitle = {};
-    for (const [sid, m] of Object.entries(meta)) {
-      (byTitle[m.title] = byTitle[m.title] || []).push(sid);
+    const byTitle = new Map();
+    for (const [key, entry] of meta) {
+      if (!byTitle.has(entry.title)) byTitle.set(entry.title, []);
+      byTitle.get(entry.title).push(key);
     }
-    const out = {};
-    for (const sids of Object.values(byTitle)) {
-      sids.sort((a, b) => meta[a].firstTs - meta[b].firstTs);
-      sids.forEach((sid, i) => {
-        out[sid] = { base: meta[sid].title, idx: i + 1, count: sids.length };
+    for (const keys of byTitle.values()) {
+      keys.sort((a, b) => meta.get(a).firstTs - meta.get(b).firstTs);
+      keys.forEach((key, i) => {
+        Object.assign(meta.get(key), { idx: i + 1, count: keys.length });
       });
     }
-    return out;
+    return meta;
   })();
-  function sessionNameById(sid) {
-    if (!sid) return "";
-    const e = SESSION_NAME[sid];
-    if (!e) return shortId(sid);
-    const base = e.base || t("session.untitled");
+  function sessionName(r) {
+    if (!r.session_id) return "";
+    const e = SESSION_NAME.get(sessionKey(r));
+    if (!e) return shortId(r.session_id);
+    const base = e.title || t("session.untitled");
     return e.count > 1 ? `${base} #${e.idx}` : base;
   }
-  const sessionName = (r) => sessionNameById(r && r.session_id);
 
   const SELECTED_HOSTS = new Set(HOSTS);
   const SELECTED_PROJECTS = new Set(PROJECTS);
   let SELECTED_SOURCE = "";
   let SELECTED_MODEL = "";
+  let SELECTED_SESSION = null;
   let SELECTED_DAY = "";
   let DATE_FROM = "";
   let DATE_TO = "";
@@ -1130,13 +1140,22 @@ __GH_USAGE_EFFORT_STYLE__
     const lineSuffix = (line != null && line > 0) ? `:${line}` : "";
     return `vscode://file${encoded}${lineSuffix}`;
   }
+  function sourceOpenUrl(r, preferVSCode = false) {
+    // A CSV's hostname does not identify the machine viewing this report.
+    if (!r.file || !RAW.localSourceHost || (r.hostname || RAW.primaryHost) !== RAW.localSourceHost) return "";
+    return preferVSCode || r.line > 0 ? vscodeFileUrl(r.file, r.line) : fileUrl(r.file);
+  }
+  function sourceInline(r, label) {
+    const url = sourceOpenUrl(r, true);
+    return escapeHtml(r.source || "") + (url ? ` · <a class="effort-source-link" href="${escapeHtml(url)}">${escapeHtml(t(label))}</a>` : "");
+  }
   function sourceCell(r) {
     const src = escapeHtml(r.source || "");
+    const openUrl = sourceOpenUrl(r);
+    if (!openUrl) return src;
     const path = r.file || "";
-    if (!path) return src;
     const lnTxt = (r.line != null && r.line > 0) ? `<span class="ln">:${r.line}</span>` : "";
     const copyVal = (r.line != null && r.line > 0) ? `${path}:${r.line}` : path;
-    const openUrl = (r.line != null && r.line > 0) ? vscodeFileUrl(path, r.line) : fileUrl(path);
     return `<span class="src-trigger">${src}<span class="info">ⓘ</span></span>
       <div class="path-pop">
         <div class="path-text">${escapeHtml(path)}${lnTxt}</div>
@@ -1154,12 +1173,14 @@ __GH_USAGE_EFFORT_STYLE__
     const skips = Array.isArray(skip) ? skip : [skip];
     const include = name => !skips.includes(name);
     const needle = FILTER_TEXT.trim().toLowerCase();
+    const selectedSessionKey = SELECTED_SESSION ? sessionKey(SELECTED_SESSION) : "";
     return RECORDS.filter(r => {
       const host = r.hostname || EFFORT_HOST;
       if (include("host") && !SELECTED_HOSTS.has(host)) return false;
       if (include("project") && !SELECTED_PROJECTS.has(projectOf(r))) return false;
       if (include("source") && SELECTED_SOURCE && r.source !== SELECTED_SOURCE) return false;
       if (include("model") && SELECTED_MODEL && r.model !== SELECTED_MODEL) return false;
+      if (selectedSessionKey && sessionKey(r) !== selectedSessionKey) return false;
       const dk = dayKey(r.timestamp_ms);
       if (include("daySelection") && SELECTED_DAY && dk !== SELECTED_DAY) return false;
       if (!reportInRange(dk)) return false;
@@ -1267,10 +1288,10 @@ __GH_USAGE_EFFORT_STYLE__
       chip("project", `${t("filter.project")}: ${Array.from(SELECTED_PROJECTS).map(projectLabel).join(", ")}`,
         () => { PROJECTS.forEach(p => SELECTED_PROJECTS.add(p)); });
     }
-    if (reportUi.sheet !== "history" && SELECTED_MODEL) {
+    if (reportUi.sheet === "usage" && SELECTED_MODEL) {
       chip("model", `${t("filter.model")}: ${SELECTED_MODEL}`, () => { SELECTED_MODEL = ""; });
     }
-    if (reportUi.sheet !== "history" && SELECTED_SOURCE) {
+    if (reportUi.sheet === "usage" && SELECTED_SOURCE) {
       chip("source", `${t("filter.source")}: ${SELECTED_SOURCE}`, () => { SELECTED_SOURCE = ""; });
     }
     if (SELECTED_DAY) {
@@ -1282,15 +1303,21 @@ __GH_USAGE_EFFORT_STYLE__
     if (DATE_TO) {
       chip("to", `${t("filter.dateTo")}: ${reportDate(DATE_TO)}`, () => { DATE_TO = ""; DATE_PRESET = "custom"; reportUi.scale = ""; });
     }
-    if (reportUi.sheet !== "history" && FILTER_TEXT.trim()) {
+    if (reportUi.sheet === "usage" && FILTER_TEXT.trim()) {
       chip("search", `${t("filter.search")}: ${FILTER_TEXT.trim()}`, () => { FILTER_TEXT = ""; });
+    }
+    if (reportUi.sheet === "usage" && SELECTED_SESSION) {
+      chip("session", `${t("cols.session")}: ${sessionName(SELECTED_SESSION)}`, () => { SELECTED_SESSION = null; });
+    }
+    if (reportUi.sheet === "effort" && effortUi.source) {
+      chip("effortSource", `${t("filter.source")}: ${effortUi.source}`, () => { effortUi.source = ""; });
     }
 
     if (chips.length === 0) { bar.innerHTML = ""; bar.style.display = "none"; return; }
     bar.style.display = "flex";
     bar.innerHTML = `<span class="fb-label">${t("filter.active")}</span>` +
       chips.map(c => {
-        const masked = (c.kind === "host" || c.kind === "project") ? " mask" : "";
+        const masked = ["host", "project", "session"].includes(c.kind) ? " mask" : "";
         return `<span class="filter-chip"><span class="lbl${masked}">${escapeHtml(c.label)}</span>` +
           `<span class="x" data-clear="${c.id}" title="×">×</span></span>`;
       }).join("") +
@@ -1325,12 +1352,15 @@ __GH_USAGE_EFFORT_STYLE__
       reportSetRange("", "", { preset: "all", focus: "" });
       return;
     }
-    SELECTED_MODEL = ""; SELECTED_SOURCE = ""; SELECTED_DAY = "";
-    reportUi.scale = ""; effortUi.source = "";
-    DATE_FROM = ""; DATE_TO = ""; DATE_PRESET = "all"; FILTER_TEXT = "";
+    SELECTED_DAY = "";
+    reportUi.scale = "";
+    if (reportUi.sheet === "effort") effortUi.source = "";
+    DATE_FROM = ""; DATE_TO = ""; DATE_PRESET = "all";
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
-    set("filter", ""); set("date-from", ""); set("date-to", "");
-    set("model-filter", ""); set("source-filter", "");
+    if (reportUi.sheet === "usage") {
+      SELECTED_MODEL = ""; SELECTED_SOURCE = ""; SELECTED_SESSION = null; FILTER_TEXT = "";
+      set("filter", ""); set("model-filter", ""); set("source-filter", "");
+    }
     CURRENT_PAGE = 1;
     renderAll();
   }
@@ -1452,6 +1482,7 @@ __GH_USAGE_EFFORT_STYLE__
     if (!start || !end || start > end) {
       container.innerHTML = `<div class="empty">${t("kpi.noTime")}</div>`;
       legend.innerHTML = "";
+      syncUsageChartOverflow(container);
       return;
     }
     const monthly = dayNumber(end) - dayNumber(start) >= 62;
@@ -1473,7 +1504,9 @@ __GH_USAGE_EFFORT_STYLE__
       const sum = Object.values(byDay[d] || {}).reduce((s, v) => s + v, 0);
       if (sum > maxTotal) maxTotal = sum;
     }
-    const W = 720, H = 248, padL = 55, padR = 12, padT = 12, padB = 30;
+    const H = 248, padL = 55, padR = 12, padT = 12, padB = 30;
+    const monthlyWidth = monthly ? padL + padR + 52 * days.length : 0;
+    const W = Math.max(720, monthlyWidth);
     const innerW = W - padL - padR, innerH = H - padT - padB;
     const barGap = 2;
     const barW = Math.max(.8, Math.min(30, (innerW / days.length) - barGap));
@@ -1486,7 +1519,7 @@ __GH_USAGE_EFFORT_STYLE__
 
     const activeHosts = HOSTS.filter(h => SELECTED_HOSTS.has(h));
 
-    let svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" width="100%" height="${H}">`;
+    let svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" width="100%" height="${H}"${monthly ? ` style="min-width:${monthlyWidth}px"` : ""}>`;
     // grid + Y labels
     for (const tick of ticks) {
       const y = padT + innerH - (innerH * (tick / (niceMax || 1)));
@@ -1512,8 +1545,8 @@ __GH_USAGE_EFFORT_STYLE__
       svg += `<rect class="bar hit usage-hit${isFocus ? " is-focus" : ""}" data-day="${d}" x="${padL + idx * step}" y="${padT}"
         width="${step}" height="${H-padT-19}" role="button" tabindex="0" aria-label="${escapeHtml(label)}"><title>${escapeHtml(label)}</title></rect>`;
     });
-    // X labels (first, last, ~3 middle)
-    const labelIdx = uniqueSorted([0, Math.floor(days.length/4), Math.floor(days.length/2), Math.floor(3*days.length/4), days.length-1]);
+    const labelIdx = monthly ? days.keys() :
+      uniqueSorted([0, Math.floor(days.length/4), Math.floor(days.length/2), Math.floor(3*days.length/4), days.length-1]);
     for (const idx of labelIdx) {
       if (idx < 0 || idx >= days.length) continue;
       const x = padL + idx * step + step/2;
@@ -1522,6 +1555,7 @@ __GH_USAGE_EFFORT_STYLE__
     }
     svg += `</svg>`;
     container.innerHTML = svg;
+    syncUsageChartOverflow(container);
     container.querySelectorAll("rect.hit[data-day]").forEach(rect => {
       const select = () => {
         const d = rect.getAttribute("data-day");
@@ -1595,8 +1629,8 @@ __GH_USAGE_EFFORT_STYLE__
       <g transform="translate(${CX},${CY})">
         <circle r="${R}" fill="none" stroke="#21262d" stroke-width="${STROKE}"/>
         ${segs}
-        <text text-anchor="middle" y="-4" fill="var(--text)" font-size="20" font-weight="700">${fmtNum(total, 1)}</text>
-        <text text-anchor="middle" y="16" fill="var(--text-dim)" font-size="11">${escapeHtml(usageUnit())}</text>
+        <text class="donut-total" text-anchor="middle" y="-4" fill="var(--text)" font-size="20" font-weight="700">${fmtNum(total, 1)}</text>
+        <text class="donut-total" text-anchor="middle" y="16" fill="var(--text-dim)" font-size="11">${escapeHtml(usageUnit())}</text>
       </g>
     </svg>`;
 
@@ -1676,18 +1710,18 @@ __GH_USAGE_EFFORT_STYLE__
 
   function renderTopSessions(records) {
     const container = document.getElementById("top-sessions");
-    const sessions = {}; // session_id -> { credits, turns, duration, project, total }
+    const sessions = new Map();
     for (const r of records) {
-      const sid = r.session_id || "(none)";
-      if (!sessions[sid]) sessions[sid] = { credits: 0, turns: 0, duration: 0, project: projectOf(r), total: r.session_total || 0 };
-      const s = sessions[sid];
+      const key = sessionKey(r);
+      if (!key) continue;
+      if (!sessions.has(key)) sessions.set(key, { record: r, credits: 0, turns: 0, duration: 0, project: projectOf(r), total: r.session_total || 0 });
+      const s = sessions.get(key);
       s.credits += showUsageAmount(r);
       if (r.turn_index != null) s.turns += 1;
       if (r.duration_ms != null && r.duration_ms > 0) s.duration += r.duration_ms;
       if (r.session_total) s.total = Math.max(s.total, r.session_total);
     }
-    const rows = Object.entries(sessions)
-      .filter(([sid]) => sid !== "(none)")
+    const rows = [...sessions]
       .sort((a, b) => b[1].credits - a[1].credits)
       .slice(0, 8);
     if (rows.length === 0) {
@@ -1702,8 +1736,8 @@ __GH_USAGE_EFFORT_STYLE__
         <th class="num">${t("sessions.colTime")}</th>
         <th class="num">${escapeHtml(usageUnit())}</th>
       </tr></thead>
-      <tbody>${rows.map(([sid, s]) => `<tr style="cursor:pointer" data-session="${escapeHtml(sid)}">
-        <td><span class="session-name mask" title="${escapeHtml(sid)}">${escapeHtml(sessionNameById(sid))}</span></td>
+      <tbody>${rows.map(([key, s]) => `<tr style="cursor:pointer" data-session="${escapeHtml(key)}">
+        <td><span class="session-name mask" title="${escapeHtml(s.record.session_id)}">${escapeHtml(sessionName(s.record))}</span></td>
         <td><span class="${s.project === NO_PROJECT ? "" : "mask"}">${escapeHtml(projectLabel(s.project))}</span></td>
         <td class="num">${s.total ? `${s.turns}/${s.total}` : (s.turns || t("session.summary"))}</td>
         <td class="num dur">${fmtDuration(s.duration)}</td>
@@ -1712,10 +1746,10 @@ __GH_USAGE_EFFORT_STYLE__
     </table>`;
     container.querySelectorAll("tr[data-session]").forEach(tr => {
       tr.addEventListener("click", () => {
-        const sid = tr.getAttribute("data-session");
-        FILTER_TEXT = sid;
+        SELECTED_SESSION = sessions.get(tr.dataset.session).record;
+        FILTER_TEXT = "";
         const fEl = document.getElementById("filter");
-        if (fEl) fEl.value = sid;
+        if (fEl) fEl.value = "";
         reportUi.detail = "usage";
         document.getElementById("related-drawer").open = true;
         CURRENT_PAGE = 1;
@@ -2004,38 +2038,44 @@ __GH_USAGE_EFFORT_STYLE__
   function renderSummaryLine() {
     document.getElementById("summary-line").textContent =
       reportUi.sheet === "history" ? t("history.header", { n: fmtNum(historyRows().length, 0) })
-      : reportUi.sheet === "effort" ? t("effort.count", { n: fmtNum(effortEventsInRange({ useSource: true }).length, 0) })
+      : reportUi.sheet === "effort" ? effortMissingAll() ? t("effort.notImported") : effortCount(effortEventsInRange({ useSource: true }).length)
       : t("header.summary", { machines: HOSTS.length, records: RECORDS.length.toLocaleString() });
   }
 
   __GH_USAGE_SHEETS_SCRIPT__
   __GH_USAGE_EFFORT_SCRIPT__
+  __GH_USAGE_THEME_SCRIPT__
 
   // ---------- main render ----------
+  let reportTheme = null;
   function renderAll() {
     const recs = filteredRecords();
     const rangeRecords = filteredRecords("daySelection");
     reportSyncChrome();
     renderSummaryLine();
-    renderTimeNavigator();
+    if (!reportTheme?.active()) renderTimeNavigator();
     syncDatePresetButtons();
     syncPricingControls();
     updateUsageLabels();
     renderFilterBar();
     syncSidebarChecks();
-    if (reportUi.sheet === "history") { renderHistory(); return; }
-    if (reportUi.sheet === "usage") {
-      renderKpis(rangeRecords);
-      renderDailyChart(rangeRecords);
-      renderModelChart(filteredRecords(["model", "daySelection"]));
-      renderProjectChart(filteredRecords(["project", "daySelection"]));
-      renderTopSessions(rangeRecords);
-      renderByMachine(rangeRecords);
-    } else renderEffort();
-    if (reportUi.detail === "usage") {
-      renderRecordsHead();
-      renderRecordsTable(recs);
-    } else renderEffortDetail();
+    if (reportUi.sheet === "history") {
+      renderHistory();
+    } else {
+      if (reportUi.sheet === "usage") {
+        renderKpis(rangeRecords);
+        if (!reportTheme?.active()) renderDailyChart(rangeRecords);
+        renderModelChart(filteredRecords(["model", "daySelection"]));
+        renderProjectChart(filteredRecords(["project", "daySelection"]));
+        renderTopSessions(rangeRecords);
+        renderByMachine(rangeRecords);
+      } else renderEffort();
+      if (reportUi.detail === "usage") {
+        renderRecordsHead();
+        renderRecordsTable(recs);
+      } else renderEffortDetail();
+    }
+    reportTheme?.render(reportUi.sheet, rangeRecords);
   }
 
   function applyLang(lang) {
@@ -2052,6 +2092,7 @@ __GH_USAGE_EFFORT_STYLE__
     btn.addEventListener("click", () => applyLang(btn.getAttribute("data-lang")));
   });
   document.getElementById("filter").addEventListener("input", e => {
+    SELECTED_SESSION = null;
     FILTER_TEXT = e.target.value || "";
     CURRENT_PAGE = 1;
     renderAll();
@@ -2223,6 +2264,18 @@ __GH_USAGE_EFFORT_STYLE__
   // boot
   document.getElementById("generated-at").textContent = RAW && RAW.generatedAt ? RAW.generatedAt : "—";
   bindReportSheets();
+  if (typeof mountRhythmTheme === "function") {
+    reportTheme = mountRhythmTheme({
+      refresh: renderAll, lang: () => CURRENT_LANG, range: reportRange, sheet: () => reportUi.sheet,
+      hosts: () => HOSTS.filter(host => SELECTED_HOSTS.has(host)), host: row => row.hostname || EFFORT_HOST,
+      day: dayKey, dayNumber, offsetDay, offsetMonth, date: reportDate, dateRange: reportDateRange,
+      amount: showUsageAmount, unit: usageUnit, number: fmtNum, time: fmtDateTime,
+      project: row => projectLabel(projectOf(row)), hostIndex: host => HOSTS.indexOf(host),
+      escape: escapeHtml, bindPan: bindUsageChartPan,
+      selected: () => ({ hosts: SELECTED_HOSTS.size, allHosts: HOSTS.length, projects: SELECTED_PROJECTS.size, allProjects: PROJECTS.length }),
+      summary: () => ["total", "records", "days"].map(key => document.getElementById(`kpi-${key}`).textContent),
+    });
+  }
   renderSourceFilter();
   try {
     COST_ENABLED = localStorage.getItem("gh-usage.costEnabled") === "1";

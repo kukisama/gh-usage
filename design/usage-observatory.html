@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>用量观测台 · gh-usage 设计稿</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0c1017; --surface: #121923; --raised: #18212d; --line: #2a3544;
+    --ink: #edf3fa; --quiet: #a4b3c5; --accent: #a5e8cf;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font: 14px/1.5 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; color: var(--ink); background: var(--bg); }
+  button, select, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  button:disabled { cursor: default; opacity: .4; }
+  :is(button,select,input,[tabindex]):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .top { border-bottom: 1px solid var(--line); background: #101620; }
+  .top-inner, main, footer { width: min(100% - 72px, 1440px); margin-inline: auto; }
+  .top-inner { height: 66px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .brand { display: flex; align-items: center; gap: 12px; font-size: 15px; font-weight: 700; }
+  .brand svg { width: 32px; height: 32px; padding: 6px; border-radius: 9px; color: var(--accent); background: #203a38; }
+  .brand small { color: var(--quiet); font-size: 12px; font-weight: 500; border-left: 1px solid var(--line); padding-left: 12px; }
+  .badge { display: flex; align-items: center; gap: 7px; color: var(--quiet); font-size: 12px; }
+  .badge::before { content: ""; width: 6px; height: 6px; background: var(--accent); border-radius: 50%; }
+  main { padding-block: 28px 26px; }
+  h1, h2, h3, p { margin: 0; }
+  .eyebrow { color: var(--accent); font: 11px/1.4 var(--mono); letter-spacing: .13em; }
+  h1 { margin-top: 7px; font-size: clamp(29px, 3.6vw, 46px); line-height: 1.16; letter-spacing: -.045em; }
+  .intro p:last-child { color: var(--quiet); margin-top: 10px; }
+  .scope { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 23px; }
+  .scope label { display: grid; gap: 4px; color: var(--quiet); font-size: 11px; }
+  .scope select, input[type=search] { background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; min-height: 37px; padding: 6px 11px; }
+  .scope select { min-width: 128px; }
+  .scope label:first-child select { min-width: 188px; }
+  .quiet-button { padding: 6px 10px; background: transparent; border: 1px solid transparent; border-radius: 7px; color: var(--quiet); }
+  .quiet-button:hover:not(:disabled) { color: var(--ink); border-color: var(--line); }
+  #reset { align-self: end; min-height: 37px; }
+  .scope-zone { margin-inline-start: auto; align-self: end; padding-block: 9px; color: var(--quiet); font-size: 12px; }
+  .summary { display: flex; align-items: end; flex-wrap: wrap; column-gap: 36px; row-gap: 14px; padding-block: 20px; }
+  .summary > div { display: grid; align-content: end; gap: 3px; }
+  .summary > div + div { border-inline-start: 1px solid var(--line); padding-inline-start: 25px; padding-block-end: 4px; }
+  .summary span, .summary small { color: var(--quiet); font-size: 12px; font-weight: 400; }
+  .summary strong { font: 650 23px/1.1 var(--mono); letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+  .summary-primary strong { font-size: clamp(34px, 5vw, 51px); color: var(--accent); }
+  .summary-primary small { margin-left: 8px; }
+  .workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(330px, .47fr); background: var(--surface); border: 1px solid var(--line); border-radius: 17px; }
+  .plot, .inspector { min-width: 0; }
+  .plot { padding: 23px 20px 19px; }
+  .panel-head { display: flex; align-items: start; justify-content: space-between; gap: 13px; flex-wrap: wrap; }
+  h2 { font-size: 19px; letter-spacing: -.02em; }
+  .caption { color: var(--quiet); font-size: 12px; margin-top: 4px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--quiet); font-size: 12px; margin-top: 16px; }
+  .legend span, .device { display: inline-flex; gap: 6px; align-items: center; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--series); display: inline-block; flex: none; }
+  .chart-scroll, .table-scroll { overflow-x: auto; overscroll-behavior-x: contain; }
+  .chart-scroll { margin-top: 20px; padding: 4px 3px; }
+  .chart { display: grid; grid-template-columns: 61px minmax(0, 1fr); min-width: var(--chart-min); }
+  .ticks, .columns { height: 244px; position: relative; }
+  .ticks span, .gridline { position: absolute; bottom: var(--at); }
+  .ticks span { right: 12px; transform: translateY(50%); color: var(--quiet); font: 11px var(--mono); }
+  .columns { display: grid; grid-template-columns: repeat(var(--columns), minmax(46px, 1fr)); gap: 4px; }
+  .gridline { inset-inline: 0; border-top: 1px solid var(--line); pointer-events: none; }
+  .bucket { position: relative; display: grid; place-items: end center; z-index: 1; background: transparent; border: 0; border-radius: 8px 8px 0 0; padding: 0; min-width: 0; }
+  .bucket:hover { background: #ffffff0a; }
+  .bucket[aria-pressed=true] { background: #a5e8cf11; }
+  .bucket[aria-pressed=true]::before { content: ""; position: absolute; top: 0; left: 50%; height: 100%; border-left: 1px dashed #a5e8cf60; }
+  .stack { position: relative; width: min(54%, 62px); display: flex; flex-direction: column-reverse; border-radius: 5px 5px 0 0; overflow: hidden; opacity: .7; }
+  .bucket:is([aria-pressed=true],:hover) .stack { opacity: 1; }
+  .stack i { display: block; width: 100%; background: var(--series); flex: 0 0 var(--share); }
+  .axis { display: grid; grid-column: 2; grid-template-columns: repeat(var(--columns), minmax(46px, 1fr)); gap: 4px; }
+  .axis span { text-align: center; padding: 8px 0; color: var(--quiet); white-space: nowrap; font-size: 12px; }
+  .axis .selected { color: var(--accent); font-weight: 650; }
+  .chart-note { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 11px; color: var(--quiet); font-size: 12px; }
+  .inspector { padding: 23px 18px 20px; border-inline-start: 1px solid var(--line); background: #141d28; border-radius: 0 16px 16px 0; }
+  .inspector h2 { margin-top: 5px; font-size: 23px; }
+  .nav { display: flex; gap: 3px; }
+  .nav .quiet-button { border-color: var(--line); min-width: 32px; }
+  .period-total { margin-top: 9px; color: var(--quiet); font-size: 12px; }
+  .period-total strong { color: var(--ink); font: 650 25px/1.2 var(--mono); margin-right: 5px; }
+  .segments { display: flex; gap: 15px; margin-top: 15px; border-bottom: 1px solid var(--line); }
+  .segments button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--quiet); padding: 7px 3px; }
+  .segments button[aria-pressed=true] { color: var(--accent); border-color: var(--accent); font-weight: 650; }
+  table { width: 100%; border-collapse: collapse; text-align: left; }
+  th, td { padding: 9px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--quiet); font-size: 11px; font-weight: 600; white-space: nowrap; }
+  td { font-size: 12px; overflow-wrap: anywhere; }
+  .number { text-align: right; font-family: var(--mono); white-space: nowrap; }
+  time { white-space: nowrap; color: var(--quiet); font: 11px var(--mono); }
+  .accent-button { width: 100%; margin-top: 14px; padding: 8px 11px; border: 1px solid #3c605a; border-radius: 8px; background: #203432; color: var(--accent); text-align: left; font-weight: 650; }
+  .accent-button:hover { background: #28443e; }
+  .accent-button span { float: right; }
+  .distribution-tools { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 12px; }
+  .distribution-tools label { display: grid; gap: 3px; color: var(--quiet); font-size: 11px; }
+  .distribution-tools select { color: var(--ink); border: 1px solid var(--line); background: var(--surface); padding: 5px; border-radius: 6px; }
+  .ranks { display: grid; gap: 10px; margin: 15px 0 0; padding: 0; list-style: none; }
+  .ranks li { display: grid; gap: 4px; }
+  .rank-value { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12px; }
+  .rank-value strong { font: 600 12px var(--mono); white-space: nowrap; }
+  .rank-track { height: 4px; border-radius: 4px; background: var(--line); overflow: hidden; }
+  .rank-track span { display: block; width: var(--share); height: 100%; background: var(--series, var(--accent)); }
+  .all-records { margin-top: 16px; border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px; background: var(--surface); }
+  .all-records td { min-width: 92px; }
+  #sort { border: 0; background: transparent; padding: 0; color: inherit; font: inherit; }
+  .pages { display: flex; justify-content: end; align-items: center; gap: 6px; margin-top: 9px; }
+  .empty { color: var(--quiet); padding-block: 18px; }
+  footer { padding-block: 8px 18px; font-size: 11px; color: var(--quiet); }
+  @media (max-width: 900px) {
+    .workspace { grid-template-columns: minmax(0, 1fr); }
+    .inspector { border-inline-start: 0; border-top: 1px solid var(--line); border-radius: 0 0 16px 16px; }
+  }
+  @media (max-width: 540px) {
+    .top-inner, main, footer { width: calc(100% - 32px); }
+    .brand small { display: none; }
+    main { padding-top: 23px; }
+    .scope-zone { margin-inline-start: 0; }
+    .summary { column-gap: 14px; }
+    .summary > div + div { padding-inline-start: 12px; }
+    .plot, .inspector, .all-records { padding-inline: 12px; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <div class="brand"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 19h18M5 15l4-6 4 3 6-7"/></svg>gh-usage <small>用量报告</small></div>
+    <span class="badge">设计预览 · 模拟数据</span>
+  </div>
+</header>
+<main>
+  <section class="intro" aria-labelledby="title">
+    <p class="eyebrow">01 / USAGE OBSERVATORY</p>
+    <h1 id="title">用量观测台</h1>
+    <p>从整体趋势追到某个月、某台机器的一条记录。</p>
+  </section>
+  <section class="scope" aria-label="全局筛选">
+    <label>统计范围<select id="range"><option value="7">2026 年 5–11 月</option><option value="3">2026 年 9–11 月</option><option value="1">2026 年 11 月</option></select></label>
+    <label>机器<select id="machine"><option value="">全部机器</option></select></label>
+    <label>项目<select id="project"><option value="">全部项目</option></select></label>
+    <button class="quiet-button" id="reset" type="button">重置</button>
+    <span class="scope-zone">北京时间 · UTC+08:00</span>
+  </section>
+  <section class="summary" aria-label="当前筛选汇总">
+    <div class="summary-primary"><span>范围内总用量</span><strong id="total"></strong></div>
+    <div><span>记录轮次</span><strong id="turns"></strong></div>
+    <div><span>活跃天数</span><strong id="active-days"></strong></div>
+  </section>
+  <div class="workspace">
+    <section class="plot" aria-labelledby="plot-title">
+      <div class="panel-head"><div><h2 id="plot-title">月度趋势</h2><p class="caption">AI 积分 · 按机器堆叠</p></div></div>
+      <div class="legend" id="legend"></div>
+      <div class="chart-scroll" role="region" aria-label="可横向滚动的月度图表" tabindex="0"><div id="chart" class="chart"></div></div>
+      <p class="chart-note">选择柱形查看当月明细，不改变顶部的统计范围。</p>
+    </section>
+    <section class="inspector" aria-labelledby="period-title">
+      <div class="panel-head">
+        <div><p class="eyebrow">02 / SELECTED PERIOD</p><h2 id="period-title" aria-live="polite"></h2></div>
+        <div class="nav"><button type="button" class="quiet-button" id="prev" aria-label="上一个月">‹</button><button type="button" class="quiet-button" id="next" aria-label="下一个月">›</button></div>
+      </div>
+      <p id="period-total" class="period-total"></p>
+      <div class="segments" role="group" aria-label="检查方式">
+        <button type="button" data-view="records" aria-controls="records">记录</button>
+        <button type="button" data-view="distribution" aria-controls="distribution">分布</button>
+      </div>
+      <div id="records">
+        <p id="preview-count" class="caption"></p>
+        <div class="table-scroll"><table aria-label="所选月份的最近记录">
+          <thead><tr><th scope="col">时间</th><th scope="col">机器 / 项目</th><th scope="col" class="number">积分</th></tr></thead>
+          <tbody id="preview-rows"></tbody>
+        </table></div>
+        <button type="button" class="accent-button" id="open-all" aria-controls="all-records">查看当月全部记录 <span aria-hidden="true">↗</span></button>
+      </div>
+      <div id="distribution" hidden>
+        <div class="distribution-tools">
+          <label>分布范围<select id="distribution-scope"><option value="period">所选月份</option><option value="global">全局筛选范围</option></select></label>
+          <label>分组方式<select id="dimension"><option value="model">按模型</option><option value="project">按项目</option><option value="hostname">按机器</option></select></label>
+        </div>
+        <p class="caption" id="distribution-caption"></p>
+        <ul class="ranks" id="distribution-rows"></ul>
+      </div>
+    </section>
+  </div>
+  <section class="all-records" id="all-records" hidden aria-labelledby="all-title">
+    <div class="panel-head"><div><h2 id="all-title" tabindex="-1"></h2><p class="caption" id="all-count"></p></div>
+      <div><input id="search" type="search" aria-label="搜索当月记录" placeholder="搜索机器、项目、模型…"> <button class="quiet-button" type="button" id="close-all">收起</button></div>
+    </div>
+    <div class="table-scroll"><table aria-label="当月完整记录">
+      <thead><tr><th id="sort-cell" scope="col" aria-sort="descending"><button type="button" id="sort">时间 ↓</button></th><th scope="col">机器</th><th scope="col">项目</th><th scope="col">模型</th><th scope="col">来源</th><th scope="col" class="number">AI 积分</th></tr></thead>
+      <tbody id="all-rows"></tbody>
+    </table></div>
+    <div class="pages"><button class="quiet-button" id="prev-page" type="button">上一页</button><span id="page-number"></span><button class="quiet-button" id="next-page" type="button">下一页</button></div>
+  </section>
+</main>
+<footer>独立 HTML 设计稿 · 使用示例记录，不读取本机日志，不连接网络。</footer>
+<script>
+  'use strict';
+  const machines = [
+    { name: '工作站', color: '#83d7bc' },
+    { name: '笔记本', color: '#849ef5' },
+    { name: '桌面机', color: '#e8b37e' }
+  ];
+  const projects = ['星图', '文档站', '开发工具'];
+  const models = ['Claude Sonnet 4.5', 'GPT-5.3-Codex', 'GPT-5.4'];
+  const months = Array.from({ length: 7 }, (_, i) => `2026-${String(5 + i).padStart(2, '0')}`);
+  const intensity = [[5, 3, 2], [6, 4, 3], [4, 9, 3], [11, 5, 6], [8, 4, 4], [16, 8, 7], [9, 7, 5]];
+  const SAMPLE = months.flatMap((month, m) => machines.flatMap(({name}, h) =>
+    Array.from({length: intensity[m][h]}, (_, i) => {
+      const day = String(2 + (3 * i + h * 2 + m) % (m === 6 ? 21 : 26)).padStart(2, '0');
+      const hour = String(9 + (i * 3 + h) % 12).padStart(2, '0');
+      const minute = String((i * 19 + m * 7) % 60).padStart(2, '0');
+      return {
+        hostname: name, project: projects[(m + i + h) % projects.length],
+        model: models[(m + i * 2 + h) % models.length],
+        source: i % 4 === 1 ? 'Copilot CLI' : 'VS Code',
+        timestamp_ms: Date.parse(`${month}-${day}T${hour}:${minute}:00+08:00`),
+        credits: (8500 + (m * 579 + h * 2947 + i * 2389) % 21600) / 100
+      };
+    })
+  ));
+  const $ = id => document.getElementById(id);
+  const format = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 });
+  const number = n => format.format(n);
+  const say = month => `${month.slice(0,4)} 年 ${Number(month.slice(5))} 月`;
+  const beijing = ms => new Date(ms + 8 * 3600000).toISOString().slice(0,16).replace('T', ' ');
+  const esc = text => String(text).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const sum = rows => rows.reduce((total, row) => total + Math.round(row.credits * 100), 0) / 100;
+  const state = { month: months.at(-1), view: 'records', expanded: false, page: 0, newest: true };
+  const previewSize = 4;
+  const pageSize = 10;
+
+  function reportScope() {
+    const dates = months.slice(-Number($('range').value));
+    if (!dates.includes(state.month)) state.month = dates.at(-1);
+    const rows = SAMPLE.filter(row => dates.includes(beijing(row.timestamp_ms).slice(0, 7))
+      && (!$('machine').value || row.hostname === $('machine').value)
+      && (!$('project').value || row.project === $('project').value));
+    const buckets = dates.map(month => {
+      const records = rows.filter(row => beijing(row.timestamp_ms).startsWith(month));
+      const parts = machines.map(machine => ({...machine, amount: sum(records.filter(row => row.hostname === machine.name))}));
+      return {month, records, parts, total: sum(records)};
+    });
+    return { rows, buckets, period: buckets.find(bucket => bucket.month === state.month) };
+  }
+
+  function renderChart(scope) {
+    const scale = Math.max(1000, Math.ceil(Math.max(...scope.buckets.map(b => b.total)) / 1000) * 1000);
+    const tickValues = [0, scale / 4, scale / 2, scale * .75, scale];
+    $('chart').style.setProperty('--columns', scope.buckets.length);
+    $('chart').style.setProperty('--chart-min', `${64 + scope.buckets.length * 52}px`);
+    const marks = tickValues.map((n, i) => `<span style="--at:${25*i}%">${number(n)}</span>`).join('');
+    const grid = tickValues.map((_, i) => `<div class="gridline" style="--at:${25*i}%"></div>`).join('');
+    const bars = scope.buckets.map(({month, parts, total}) => {
+      const description = `${say(month)} · ${number(total)} AI 积分`;
+      return `<button type="button" class="bucket" data-month="${month}" aria-pressed="${month === state.month}" aria-label="${description}" title="${description}">
+        <span class="stack" style="height:${100 * total / scale}%">${parts.map(p => `<i style="--series:${p.color};--share:${total ? 100 * p.amount / total : 0}%"></i>`).join('')}</span>
+      </button>`;
+    }).join('');
+    $('chart').innerHTML = `<div class="ticks" aria-hidden="true">${marks}</div><div class="columns">${grid}${bars}</div><div class="axis" aria-hidden="true">${scope.buckets.map(b => `<span class="${b.month === state.month ? 'selected' : ''}">${Number(b.month.slice(5))}月</span>`).join('')}</div>`;
+  }
+
+  function renderInspector(scope) {
+    const { period, buckets } = scope;
+    const selected = buckets.indexOf(period);
+    const latest = [...period.records].sort((a,b) => b.timestamp_ms - a.timestamp_ms);
+    $('period-title').textContent = say(period.month);
+    $('prev').disabled = selected === 0;
+    $('next').disabled = selected === buckets.length - 1;
+    $('period-total').hidden = period.records.length === scope.rows.length || !period.records.length;
+    $('period-total').innerHTML = `<strong>${number(period.total)}</strong> AI 积分`;
+    $('preview-count').textContent = latest.length ? `最近 ${Math.min(previewSize, latest.length)} 条 · 共 ${latest.length} 条` : '该月在当前筛选下没有记录';
+    $('preview-rows').innerHTML = latest.slice(0, previewSize).map(row => {
+      const machine = machines.find(m => m.name === row.hostname);
+      return `<tr><td><time title="${beijing(row.timestamp_ms)}">${beijing(row.timestamp_ms).slice(5)}</time></td><td><span class="device"><i class="dot" style="--series:${machine.color}"></i>${esc(row.hostname)}</span><div class="caption">${esc(row.project)}</div></td><td class="number">${number(row.credits)}</td></tr>`;
+    }).join('');
+    $('open-all').disabled = !latest.length;
+    for (const button of document.querySelectorAll('[data-view]')) button.setAttribute('aria-pressed', String(button.dataset.view === state.view));
+    $('records').hidden = state.view !== 'records';
+    $('distribution').hidden = state.view !== 'distribution';
+    if (state.view === 'distribution') {
+      const global = $('distribution-scope').value === 'global';
+      const dimension = $('dimension').value;
+      const rows = global ? scope.rows : period.records;
+      const groups = new Map();
+      for (const row of rows) groups.set(row[dimension], (groups.get(row[dimension]) || 0) + Math.round(row.credits * 100));
+      const denom = Math.round(sum(rows) * 100) || 1;
+      $('distribution-caption').textContent = global ? '全局筛选范围内的积分占比' : `${say(period.month)}的积分占比`;
+      $('distribution-rows').innerHTML = [...groups].sort((a,b) => b[1] - a[1]).map(([name,value]) => {
+        const pct = 100 * value / denom;
+        const machine = dimension === 'hostname' && machines.find(m => m.name === name);
+        const ruler = groups.size > 1 ? `<div class="rank-track"><span style="--share:${pct}%;--series:${machine ? machine.color : 'var(--accent)'}"></span></div>` : '';
+        return `<li><div class="rank-value"><span>${esc(name)}</span><strong>${number(value / 100)}${groups.size > 1 ? ` · ${pct.toFixed(1)}%` : ' 积分'}</strong></div>${ruler}</li>`;
+      }).join('') || '<li class="empty">当前范围没有记录。</li>';
+    }
+  }
+
+  function renderAllRecords({period}) {
+    $('all-records').hidden = !state.expanded;
+    $('open-all').setAttribute('aria-expanded', String(state.expanded));
+    if (!state.expanded) return;
+    const query = $('search').value.trim().toLowerCase();
+    const rows = period.records.filter(row => [row.hostname,row.project,row.model,row.source].some(text => text.toLowerCase().includes(query)));
+    rows.sort((a,b) => (state.newest ? -1 : 1) * (a.timestamp_ms - b.timestamp_ms));
+    const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+    state.page = Math.min(state.page, pages - 1);
+    $('all-title').textContent = `${say(period.month)} · 全部记录`;
+    $('all-count').textContent = `显示范围：所选月份 · 匹配 ${rows.length} / ${period.records.length} 条`;
+    $('sort').textContent = state.newest ? '时间 ↓' : '时间 ↑';
+    $('sort-cell').setAttribute('aria-sort', state.newest ? 'descending' : 'ascending');
+    $('page-number').textContent = `${state.page + 1} / ${pages}`;
+    $('prev-page').disabled = state.page === 0;
+    $('next-page').disabled = state.page >= pages - 1;
+    $('all-rows').innerHTML = rows.slice(state.page * pageSize, (state.page + 1) * pageSize).map(row => `<tr><td><time>${beijing(row.timestamp_ms)}</time></td><td>${esc(row.hostname)}</td><td>${esc(row.project)}</td><td>${esc(row.model)}</td><td>${esc(row.source)}</td><td class="number">${number(row.credits)}</td></tr>`).join('') || '<tr><td class="empty" colspan="6">没有匹配的记录。</td></tr>';
+  }
+
+  function render() {
+    const scope = reportScope();
+    $('total').innerHTML = `${number(sum(scope.rows))} <small>AI 积分</small>`;
+    $('turns').textContent = number(scope.rows.length);
+    $('active-days').textContent = number(new Set(scope.rows.map(row => beijing(row.timestamp_ms).slice(0,10))).size);
+    $('legend').innerHTML = machines.filter(m => !$('machine').value || m.name === $('machine').value)
+      .map(m => `<span><i class="dot" style="--series:${m.color}"></i>${esc(m.name)}</span>`).join('');
+    renderChart(scope);
+    renderInspector(scope);
+    renderAllRecords(scope);
+  }
+
+  function selectMonth(month, focusBar = false) {
+    state.month = month;
+    state.page = 0;
+    render();
+    if (focusBar) $('chart').querySelector(`[data-month="${month}"]`).focus({preventScroll: true});
+  }
+  for (const m of machines) $('machine').add(new Option(m.name, m.name));
+  for (const name of projects) $('project').add(new Option(name, name));
+  for (const id of ['range','machine','project']) $(id).addEventListener('change', () => { state.page = 0; render(); });
+  $('reset').addEventListener('click', () => {
+    $('range').value = '7'; $('machine').value = ''; $('project').value = '';
+    $('search').value = ''; selectMonth(months.at(-1));
+  });
+  $('chart').addEventListener('click', e => { const button = e.target.closest('[data-month]'); if (button) selectMonth(button.dataset.month, true); });
+  for (const [id, delta] of [['prev',-1],['next',1]]) $(id).addEventListener('click', () => {
+    selectMonth(months[months.indexOf(state.month) + delta]);
+    if ($(id).disabled) $(delta < 0 ? 'next' : 'prev').focus();
+  });
+  for (const button of document.querySelectorAll('[data-view]')) button.addEventListener('click', () => {
+    state.view = button.dataset.view;
+    renderInspector(reportScope());
+  });
+  for (const id of ['distribution-scope','dimension']) $(id).addEventListener('change', () => renderInspector(reportScope()));
+  $('open-all').addEventListener('click', () => {
+    state.expanded = true;
+    renderAllRecords(reportScope());
+    $('all-title').focus();
+  });
+  $('close-all').addEventListener('click', () => {
+    state.expanded = false;
+    renderAllRecords(reportScope());
+    if (!$('open-all').disabled && !$('records').hidden) $('open-all').focus();
+    else document.querySelector(`[data-view="${state.view}"]`).focus();
+  });
+  $('search').addEventListener('input', () => { state.page = 0; renderAllRecords(reportScope()); });
+  $('sort').addEventListener('click', () => { state.newest = !state.newest; state.page = 0; renderAllRecords(reportScope()); });
+  for (const [id, delta] of [['prev-page',-1],['next-page',1]]) $(id).addEventListener('click', () => {
+    state.page += delta;
+    renderAllRecords(reportScope());
+    if ($(id).disabled) $(delta < 0 ? 'next-page' : 'prev-page').focus();
+  });
+  render();
+</script>
+</body>
+</html>
