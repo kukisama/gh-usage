@@ -101,7 +101,7 @@ If `winget` itself is missing, install App Installer / Windows Package Manager f
 
 The script requires the active shell to be PowerShell 7. If it installs PowerShell 7, or if you are currently running Windows PowerShell instead of PowerShell 7, restart the console with `pwsh` and rerun the script.
 
-The target GitHub Release must already exist and include the expected Windows zip and checksum file.
+The target GitHub Release must be published (not a draft) and include release notes, the expected Windows ZIP, and its checksum file.
 
 ### Check the release account and authorize both tools
 
@@ -178,24 +178,23 @@ After submit, `wingetcreate` should create a pull request and print its URL. At 
 Use this sequence for a normal winget release:
 
 1. Confirm the GitHub Release exists and [check the release account](#check-the-release-account-and-authorize-both-tools).
-2. If the validation command installs missing prerequisites, restart the console with PowerShell 7 and rerun it.
-3. Run:
+2. Run the validation command. If it installs missing prerequisites, restart the console with PowerShell 7 and rerun it:
 
    ```powershell
    .\scripts\publish-winget.ps1 -Version 1.0.0 -Validate
    ```
 
-4. Confirm validation succeeds.
-5. Run:
+3. Confirm validation succeeds. Before submitting a new binary, smoke-test the published Windows ZIP on clean Windows without Visual C++ Redistributable installed. Extract the ZIP, run `gh-usage.exe --version`, then run it without arguments from a terminal in a writable folder. Both should exit successfully without requiring a browser or keypress.
+4. Submit when ready:
 
    ```powershell
    .\scripts\publish-winget.ps1 -Version 1.0.0 -Submit
    ```
 
-6. Complete any browser login or organization SSO prompt using the same GitHub release identity for both tools.
-7. Open the PR URL printed by `wingetcreate`.
-8. Wait for validation and maintainer review.
-9. Respond only if `wingetbot` or maintainers request changes.
+5. Complete any browser login or organization SSO prompt using the same GitHub release identity for both tools.
+6. Open the PR URL printed by `wingetcreate`.
+7. Wait for validation and maintainer review.
+8. Respond only if `wingetbot` or maintainers request changes.
 
 ## Duplicate PR protection
 
@@ -258,6 +257,8 @@ It contains:
 - `Kukisama.gh-usage.installer.yaml`
 - `Kukisama.gh-usage.locale.en-US.yaml`
 
+The default locale manifest includes `PublisherUrl` and `PublisherSupportUrl` from the release repository's owner page and Issues page, and `ReleaseNotes` from the current GitHub Release body. Notes exceeding the schema's 10,000-character limit are shortened; `ReleaseNotesUrl` still links to the full notes. The installer manifest sets `ReleaseDate` from the GitHub Release's UTC publication date. None of these fields depends on the account used to submit the PR.
+
 The downloaded release assets are also stored under:
 
 ```text
@@ -290,6 +291,10 @@ The checksum file must contain a SHA256 line for the Windows zip. Otherwise the 
 ### The zip does not contain `gh-usage.exe` at the root
 
 The script expects `gh-usage.exe` at the zip root. If the executable is nested inside a folder, winget portable install behavior may not match the manifest.
+
+### The executable cannot start on clean Windows
+
+Windows MSVC builds use a statically linked C runtime via `.cargo/config.toml` to avoid requiring Visual C++ Redistributable for the standalone EXE. The release workflow checks for dynamic CRT imports and runs `--version` before packaging. The CI smoke test does not replace testing the published ZIP in a clean Windows environment. If rebuilding is necessary, publish a new version instead of replacing a ZIP that has already been published.
 
 ### `winget validate` fails
 

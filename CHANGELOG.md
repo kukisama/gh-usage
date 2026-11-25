@@ -8,7 +8,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [1.2.6] — Unreleased
+## [1.2.6] — 2026-11-25
 
 Rebuild reports from CSV without rescanning logs, and combine effort across machines without double-counting shared time slots.
 
@@ -32,6 +32,8 @@ Rebuild reports from CSV without rescanning logs, and combine effort across mach
 - **Accurate effort coverage.** Machines with empty usage exports remain listed. Missing effort CSVs are shown as not imported, not as zero effort.
 - **Keep sessions distinct across machines.** The session ranking and drill-down distinguish matching session IDs on different machines. Titles found only in historical records can also appear in effort details.
 - **Keep filters and dates consistent across sheets.** Usage-only filters stay with the Usage sheet. Switching between Usage and Effort keeps the selected date within the visible range, even when their log dates differ.
+- **Windows portable builds no longer require a separate Visual C++ Redistributable.** The standalone executable links the C runtime statically. Release CI checks its DLL imports and runs `--version` before packaging.
+- **WinGet updates preserve release metadata.** Generated manifests include the publisher page, support link, release notes, and UTC release date.
 
 ## [1.2.5] — 2026-11-23
 

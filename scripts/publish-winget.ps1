@@ -142,9 +142,16 @@ function ConvertTo-ReleaseTag {
 function Get-JsonFromGh {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
 
-    $output = & gh @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "gh command failed: gh $($Arguments -join ' ')"
+    $previousEncoding = [Console]::OutputEncoding
+    try {
+        [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+        $output = & gh @Arguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "gh command failed: gh $($Arguments -join ' ')"
+        }
+    }
+    finally {
+        [Console]::OutputEncoding = $previousEncoding
     }
 
     return $output | ConvertFrom-Json
@@ -475,10 +482,15 @@ function Write-WingetManifestFiles {
         [Parameter(Mandatory = $true)][string]$DefaultLocale,
         [Parameter(Mandatory = $true)][string]$InstallerUrl,
         [Parameter(Mandatory = $true)][string]$InstallerSha256,
+        [Parameter(Mandatory = $true)][string]$ReleaseDate,
+        [Parameter(Mandatory = $true)][string]$ReleaseNotes,
         [Parameter(Mandatory = $true)][string]$ManifestVersion
     )
 
     New-Item -ItemType Directory -Force -Path $ManifestDir | Out-Null
+    $repositoryOwner = $Repository.Split('/')[0]
+    # A JSON string is also a YAML double-quoted scalar, preserving multi-line Markdown safely.
+    $releaseNotesYaml = ConvertTo-Json -InputObject $ReleaseNotes -Compress
 
     $versionManifest = @"
 # yaml-language-server: `$schema=https://aka.ms/winget-manifest.version.$ManifestVersion.schema.json
@@ -500,6 +512,7 @@ NestedInstallerType: portable
 NestedInstallerFiles:
 - RelativeFilePath: gh-usage.exe
   PortableCommandAlias: gh-usage
+ReleaseDate: $ReleaseDate
 Installers:
 - Architecture: x64
   InstallerUrl: $InstallerUrl
@@ -515,6 +528,8 @@ PackageIdentifier: $PackageIdentifier
 PackageVersion: $PackageVersion
 PackageLocale: $DefaultLocale
 Publisher: $Publisher
+PublisherUrl: https://github.com/$repositoryOwner
+PublisherSupportUrl: https://github.com/$Repository/issues
 PackageName: $PackageName
 PackageUrl: https://github.com/$Repository
 License: MIT
@@ -530,6 +545,7 @@ Tags:
 - usage-tracking
 - csv
 - json
+ReleaseNotes: $releaseNotesYaml
 ReleaseNotesUrl: https://github.com/$Repository/releases/tag/v$PackageVersion
 ManifestType: defaultLocale
 ManifestVersion: $ManifestVersion
@@ -558,7 +574,21 @@ if ($Submit) {
 }
 
 Write-Host "Reading GitHub release $releaseTag..." -ForegroundColor Cyan
-$release = Get-JsonFromGh -Arguments @('release', 'view', $releaseTag, '--repo', $Repository, '--json', 'tagName,assets,url')
+$release = Get-JsonFromGh -Arguments @('release', 'view', $releaseTag, '--repo', $Repository, '--json', 'tagName,assets,url,body,publishedAt')
+if (-not $release.publishedAt) {
+    throw "GitHub release $releaseTag is not published. Publish it before generating a winget manifest."
+}
+$releaseDate = ([DateTimeOffset]$release.publishedAt).UtcDateTime.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+$releaseNotes = ([string]$release.body).Trim()
+if (-not $releaseNotes) {
+    throw "GitHub release $releaseTag has no release notes. Add a description before generating a winget manifest."
+}
+if ($releaseNotes.Length -gt 10000) {
+    # Leave room for an ellipsis and avoid cutting a UTF-16 surrogate pair in half.
+    $limit = 9997
+    if ([char]::IsHighSurrogate($releaseNotes[$limit - 1])) { $limit-- }
+    $releaseNotes = $releaseNotes.Substring(0, $limit).TrimEnd() + '...'
+}
 $windowsInstallerAsset = Get-ReleaseAsset -Release $release -Pattern $assetName
 $checksumsAsset = Get-ReleaseAsset -Release $release -Pattern "gh-usage-$releaseTag-checksums.txt"
 $assetUrl = $windowsInstallerAsset.url
@@ -589,6 +619,8 @@ Write-WingetManifestFiles `
     -DefaultLocale $DefaultLocale `
     -InstallerUrl $assetUrl `
     -InstallerSha256 $installerSha256 `
+    -ReleaseDate $releaseDate `
+    -ReleaseNotes $releaseNotes `
     -ManifestVersion $ManifestVersion
 
 Write-Host "Prepared winget manifest:" -ForegroundColor Green

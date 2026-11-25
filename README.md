@@ -10,7 +10,7 @@ English | [简体中文](design/README.zh-CN.md)
 > One command turns your scattered local GitHub Copilot usage records into a clean, visual report.
 > Nothing is uploaded, nothing phones home — your data stays on your machine.
 
-[What's new in 1.2.5](CHANGELOG.md#125--2026-11-23)
+[What's new in 1.2.6](CHANGELOG.md#126--2026-11-25)
 
 ![gh-usage report overview](design/01.jpg)
 
